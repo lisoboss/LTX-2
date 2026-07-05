@@ -2235,7 +2235,7 @@ requires-dist = [
     { name = "safetensors" },
     { name = "scipy", specifier = ">=1.14" },
     { name = "tensorrt-llm", marker = "extra == 'fp8-trtllm'", specifier = "==1.0.0", index = "https://pypi.nvidia.com/" },
-    { name = "torch", specifier = "~=2.7" },
+    { name = "torch", specifier = ">=2.7" },
     { name = "torchaudio" },
     { name = "transformers", specifier = ">=4.52" },
     { name = "xformers", marker = "extra == 'xformers'", index = "https://download.pytorch.org/whl/cu130" },
