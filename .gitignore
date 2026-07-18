@@ -67,3 +67,5 @@ wandb/
 
 # Binary files
 *.so
+
+/models

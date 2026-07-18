@@ -36,10 +36,10 @@ PRODUCTION_WIDTH = PREVIEW_WIDTH * 2
 FRAME_RATE = 24.0
 DEFAULT_SEED = 10
 
-DISTILLED_CHECKPOINT_RELATIVE_PATH = Path("ltx-2.3-22b-distilled-1.1.safetensors")
-SPATIAL_UPSAMPLER_RELATIVE_PATH = Path("ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
-GEMMA_RELATIVE_PATH = Path("gemma")
-IC_LORA_RELATIVE_PATH = Path("ltx-2.3-22b-ic-lora-union-control.safetensors")
+DISTILLED_CHECKPOINT_RELATIVE_PATH = Path("LTX-2.3/ltx-2.3-22b-distilled-1.1.safetensors")
+SPATIAL_UPSAMPLER_RELATIVE_PATH = Path("LTX-2.3/ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
+GEMMA_RELATIVE_PATH = Path("gemma-3-12b-it-qat-q4_0-unquantized")
+IC_LORA_RELATIVE_PATH = Path("LTX-2.3/ltx-2.3-22b-ic-lora-union-control.safetensors")
 
 
 def duration_to_num_frames(duration_seconds: float, frame_rate: float = FRAME_RATE) -> int:
