@@ -25,6 +25,8 @@ uv sync --frozen
 uv run python preview_production.py --help
 ```
 
+脚本默认使用 `--offload cpu`：完整 Transformer 权重固定在系统内存、按层传输到 GPU，适用于 12 GB 显存，但通常需要约 36 GB 系统内存。若系统内存不足，改用 `--offload disk`（更慢，但约需 5 GB 系统内存）；只有显存约 28 GB 或更高时才使用 `--offload none`。
+
 ## 模型目录
 
 所有模型路径均相对 `--model-root` 固定，不读取环境变量。当前脚本期望如下布局：
@@ -52,6 +54,7 @@ uv run python preview_production.py fast \
   --prompt "A red fox runs through a snowy forest, cinematic tracking shot" \
   --duration-seconds 5 \
   --artifact-path outputs/preview.pt \
+  --offload cpu \
   --output-path outputs/preview.mp4 \
   --seed 42
 ```
@@ -66,6 +69,7 @@ uv run python preview_production.py fast \
 uv run python preview_production.py production \
   --model-root /path/to/models \
   --artifact-path outputs/preview.pt \
+  --offload cpu \
   --output-path outputs/production.mp4
 ```
 
@@ -81,6 +85,7 @@ uv run python preview_production.py modify \
   --preview-video-path outputs/preview.mp4 \
   --prompt "The same fox pauses, looks into the camera, then walks away" \
   --duration-seconds 5 \
+  --offload cpu \
   --output-path outputs/modified.mp4 \
   --seed 42
 ```

@@ -26,7 +26,7 @@ from ltx_pipelines.utils.constants import DISTILLED_SIGMAS, STAGE_2_DISTILLED_SI
 from ltx_pipelines.utils.denoisers import SimpleDenoiser
 from ltx_pipelines.utils.helpers import assert_resolution, combined_image_conditionings
 from ltx_pipelines.utils.media_io import encode_video
-from ltx_pipelines.utils.types import ModalitySpec
+from ltx_pipelines.utils.types import ModalitySpec, OffloadMode
 
 ARTIFACT_VERSION = 1
 PREVIEW_HEIGHT = 384
@@ -35,6 +35,7 @@ PRODUCTION_HEIGHT = PREVIEW_HEIGHT * 2
 PRODUCTION_WIDTH = PREVIEW_WIDTH * 2
 FRAME_RATE = 24.0
 DEFAULT_SEED = 10
+DEFAULT_OFFLOAD_MODE = OffloadMode.CPU
 
 DISTILLED_CHECKPOINT_RELATIVE_PATH = Path("LTX-2.3/ltx-2.3-22b-distilled-1.1.safetensors")
 SPATIAL_UPSAMPLER_RELATIVE_PATH = Path("LTX-2.3/ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
@@ -290,9 +291,9 @@ class PreviewVideoModifyPipeline:
 class LTX2FastVideo:
     """Model-root-only low-resolution preview feature."""
 
-    def __init__(self, model_root: Path) -> None:
+    def __init__(self, model_root: Path, offload_mode: OffloadMode = DEFAULT_OFFLOAD_MODE) -> None:
         self.model_root = Path(model_root)
-        self._adapter = PreviewProductionPipeline(_make_distilled_pipeline(self.model_root))
+        self._adapter = PreviewProductionPipeline(_make_distilled_pipeline(self.model_root, offload_mode))
 
     def generate(self, *, prompt: str, duration_seconds: float, seed: int | None = None) -> FastVideoResult:
         return self._adapter.run_stage_1(
@@ -308,9 +309,9 @@ class LTX2FastVideo:
 class LTX2HighResolutionVideo:
     """Model-root-only stage-2 production feature."""
 
-    def __init__(self, model_root: Path) -> None:
+    def __init__(self, model_root: Path, offload_mode: OffloadMode = DEFAULT_OFFLOAD_MODE) -> None:
         self.model_root = Path(model_root)
-        self._adapter = PreviewProductionPipeline(_make_distilled_pipeline(self.model_root))
+        self._adapter = PreviewProductionPipeline(_make_distilled_pipeline(self.model_root, offload_mode))
 
     def generate(self, *, artifact: DistilledStage1Artifact) -> tuple[Iterator[torch.Tensor], Audio]:
         if (artifact.height, artifact.width, artifact.frame_rate) != (PRODUCTION_HEIGHT, PRODUCTION_WIDTH, FRAME_RATE):
@@ -321,9 +322,9 @@ class LTX2HighResolutionVideo:
 class LTX2VideoModify:
     """Model-root-only IC-LoRA preview modification feature."""
 
-    def __init__(self, model_root: Path) -> None:
+    def __init__(self, model_root: Path, offload_mode: OffloadMode = DEFAULT_OFFLOAD_MODE) -> None:
         self.model_root = Path(model_root)
-        self._adapter = PreviewVideoModifyPipeline(_make_ic_lora_pipeline(self.model_root))
+        self._adapter = PreviewVideoModifyPipeline(_make_ic_lora_pipeline(self.model_root, offload_mode))
 
     def generate(
         self,
@@ -344,7 +345,7 @@ class LTX2VideoModify:
         )
 
 
-def _make_distilled_pipeline(model_root: Path) -> DistilledPipeline:
+def _make_distilled_pipeline(model_root: Path, offload_mode: OffloadMode) -> DistilledPipeline:
     return DistilledPipeline(
         distilled_checkpoint_path=str(model_root / DISTILLED_CHECKPOINT_RELATIVE_PATH),
         gemma_root=str(model_root / GEMMA_RELATIVE_PATH),
@@ -356,16 +357,18 @@ def _make_distilled_pipeline(model_root: Path) -> DistilledPipeline:
                 LTXV_LORA_COMFY_RENAMING_MAP,
             )
         ],
+        offload_mode=offload_mode,
     )
 
 
-def _make_ic_lora_pipeline(model_root: Path) -> ICLoraPipeline:
+def _make_ic_lora_pipeline(model_root: Path, offload_mode: OffloadMode) -> ICLoraPipeline:
     lora_path = model_root / IC_LORA_RELATIVE_PATH
     return ICLoraPipeline(
         distilled_checkpoint_path=str(model_root / DISTILLED_CHECKPOINT_RELATIVE_PATH),
         gemma_root=str(model_root / GEMMA_RELATIVE_PATH),
         spatial_upsampler_path=str(model_root / SPATIAL_UPSAMPLER_RELATIVE_PATH),
         loras=[LoraPathStrengthAndSDOps(str(lora_path), 1.0, LTXV_LORA_COMFY_RENAMING_MAP)],
+        offload_mode=offload_mode,
     )
 
 
@@ -418,7 +421,7 @@ def main() -> None:
 
     args = parser.parse_args()
     if args.command == "fast":
-        result = LTX2FastVideo(args.model_root).generate(
+        result = LTX2FastVideo(args.model_root, args.offload).generate(
             prompt=args.prompt,
             duration_seconds=args.duration_seconds,
             seed=args.seed,
@@ -427,10 +430,10 @@ def main() -> None:
         _encode(result.video, result.audio, result.artifact.num_frames, result.artifact.frame_rate, args.output_path)
     elif args.command == "production":
         artifact = DistilledStage1Artifact.load(args.artifact_path)
-        video, audio = LTX2HighResolutionVideo(args.model_root).generate(artifact=artifact)
+        video, audio = LTX2HighResolutionVideo(args.model_root, args.offload).generate(artifact=artifact)
         _encode(video, audio, artifact.num_frames, artifact.frame_rate, args.output_path)
     else:
-        video, audio = LTX2VideoModify(args.model_root).generate(
+        video, audio = LTX2VideoModify(args.model_root, args.offload).generate(
             preview_video_path=args.preview_video_path,
             prompt=args.prompt,
             duration_seconds=args.duration_seconds,
@@ -441,6 +444,13 @@ def main() -> None:
 
 def _add_model_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model-root", required=True, type=Path)
+    parser.add_argument(
+        "--offload",
+        type=OffloadMode,
+        choices=list(OffloadMode),
+        default=DEFAULT_OFFLOAD_MODE,
+        help="Weight streaming mode: cpu (default, about 5 GB VRAM), disk, or none (about 28 GB VRAM).",
+    )
 
 
 def _encode(
