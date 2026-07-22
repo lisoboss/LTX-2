@@ -11,6 +11,15 @@ output_dir=outputs/fox-workflow
 seed=42
 offload=disk
 
+uv_bin=${UV_BIN:-uv}
+if ! command -v "$uv_bin" >/dev/null 2>&1; then
+  uv_bin="$HOME/.local/bin/uv"
+fi
+if [[ ! -x "$uv_bin" ]]; then
+  echo "uv not found. Set UV_BIN or install uv at $HOME/.local/bin/uv." >&2
+  exit 1
+fi
+
 mkdir -p "$output_dir"
 
 run_command() {
@@ -24,7 +33,7 @@ if [[ -f "$output_dir/fast.done" && -s "$output_dir/preview.mp4" && -s "$output_
   echo "[skip] fast"
 else
   rm -f "$output_dir/production.done" "$output_dir/modify.done"
-  run_command uv run python preview_production.py fast \
+  run_command "$uv_bin" run python preview_production.py fast \
     --model-root "$model_root" \
     --offload "$offload" \
     --prompt "$fast_prompt" \
@@ -39,7 +48,7 @@ fi
 if [[ -f "$output_dir/production.done" && -s "$output_dir/production.mp4" ]]; then
   echo "[skip] production"
 else
-  run_command uv run python preview_production.py production \
+  run_command "$uv_bin" run python preview_production.py production \
     --model-root "$model_root" \
     --offload "$offload" \
     --artifact-path "$output_dir/preview.pt" \
@@ -51,7 +60,7 @@ fi
 if [[ -f "$output_dir/modify.done" && -s "$output_dir/modified.mp4" ]]; then
   echo "[skip] modify"
 else
-  run_command uv run python preview_production.py modify \
+  run_command "$uv_bin" run python preview_production.py modify \
     --model-root "$model_root" \
     --offload "$offload" \
     --preview-video-path "$output_dir/preview.mp4" \
