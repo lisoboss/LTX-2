@@ -195,7 +195,7 @@ class PreviewProductionPipeline:
             frame_rate=frame_rate,
         )
         return FastVideoResult(
-            video=pipeline.video_decoder(video_state.latent, tiling_config, generator),
+            video=_inference_iterator(pipeline.video_decoder(video_state.latent, tiling_config, generator)),
             audio=pipeline.audio_decoder(audio_state.latent),
             artifact=artifact,
         )
@@ -255,7 +255,7 @@ class PreviewProductionPipeline:
             ),
         )
         return (
-            pipeline.video_decoder(video_state.latent, tiling_config, generator),
+            _inference_iterator(pipeline.video_decoder(video_state.latent, tiling_config, generator)),
             pipeline.audio_decoder(audio_state.latent),
         )
 
@@ -280,7 +280,7 @@ class PreviewVideoModifyPipeline:
         tiling_config: TilingConfig | None = None,
     ) -> tuple[Iterator[torch.Tensor], Audio]:
         """Modify a preview while always retaining the IC-LoRA production stage."""
-        return self._pipeline(
+        video, audio = self._pipeline(
             prompt=prompt,
             seed=seed,
             height=height,
@@ -292,6 +292,7 @@ class PreviewVideoModifyPipeline:
             tiling_config=tiling_config,
             skip_stage_2=False,
         )
+        return _inference_iterator(video), audio
 
 
 class LTX2FastVideo:
@@ -512,6 +513,12 @@ def _encode_to_path(
 def _temporary_path(path: Path) -> Path:
     """Return a same-directory temporary path that retains the media suffix."""
     return path.with_name(f".{path.stem}.tmp{path.suffix}")
+
+
+def _inference_iterator(video: Iterator[torch.Tensor]) -> Iterator[torch.Tensor]:
+    """Keep inference mode active while a lazily decoded video is consumed."""
+    with torch.inference_mode():
+        yield from video
 
 
 if __name__ == "__main__":
