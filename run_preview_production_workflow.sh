@@ -21,6 +21,7 @@ if [[ ! -x "$uv_bin" ]]; then
 fi
 
 mkdir -p "$output_dir"
+exec > >(tee -a "$output_dir/workflow.log") 2>&1
 
 run_command() {
   printf '[command]'
