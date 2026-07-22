@@ -21,7 +21,15 @@ if [[ ! -x "$uv_bin" ]]; then
 fi
 
 mkdir -p "$output_dir"
-exec > >(tee -a "$output_dir/workflow.log") 2>&1
+
+timestamp_log() {
+  while IFS= read -r line; do
+    printf '[%s] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$line"
+  done
+}
+
+exec > >(timestamp_log | tee -a "$output_dir/workflow.log") 2>&1
+echo "===== workflow started ====="
 
 run_command() {
   printf '[command]'
