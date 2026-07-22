@@ -35,7 +35,7 @@ PRODUCTION_HEIGHT = PREVIEW_HEIGHT * 2
 PRODUCTION_WIDTH = PREVIEW_WIDTH * 2
 FRAME_RATE = 24.0
 DEFAULT_SEED = 10
-DEFAULT_OFFLOAD_MODE = OffloadMode.CPU
+DEFAULT_OFFLOAD_MODE = OffloadMode.DISK
 
 DISTILLED_CHECKPOINT_RELATIVE_PATH = Path("LTX-2.3/ltx-2.3-22b-distilled-1.1.safetensors")
 SPATIAL_UPSAMPLER_RELATIVE_PATH = Path("LTX-2.3/ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
@@ -79,6 +79,8 @@ class DistilledStage1Artifact:
     def save(self, path: Path) -> None:
         """Persist a device-independent artifact. Tensors are always copied to CPU."""
         path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = _temporary_path(path)
         payload = {
             "version": self.version,
             "video_latent": self.video_latent.detach().to(device="cpu").contiguous(),
@@ -90,7 +92,11 @@ class DistilledStage1Artifact:
             "num_frames": self.num_frames,
             "frame_rate": self.frame_rate,
         }
-        torch.save(payload, path)
+        try:
+            torch.save(payload, temporary_path)
+            temporary_path.replace(path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
 
     @classmethod
     def load(cls, path: Path) -> DistilledStage1Artifact:
@@ -426,8 +432,7 @@ def main() -> None:
             duration_seconds=args.duration_seconds,
             seed=args.seed,
         )
-        result.artifact.save(args.artifact_path)
-        _encode(result.video, result.audio, result.artifact.num_frames, result.artifact.frame_rate, args.output_path)
+        _publish_fast_result(result, args.artifact_path, args.output_path)
     elif args.command == "production":
         artifact = DistilledStage1Artifact.load(args.artifact_path)
         video, audio = LTX2HighResolutionVideo(args.model_root, args.offload).generate(artifact=artifact)
@@ -449,7 +454,7 @@ def _add_model_arguments(parser: argparse.ArgumentParser) -> None:
         type=OffloadMode,
         choices=list(OffloadMode),
         default=DEFAULT_OFFLOAD_MODE,
-        help="Weight streaming mode: cpu (default, about 5 GB VRAM), disk, or none (about 28 GB VRAM).",
+        help="Weight streaming mode: disk (default, lowest host-memory use), cpu, or none (about 28 GB VRAM).",
     )
 
 
@@ -461,6 +466,40 @@ def _encode(
     output_path: Path,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = _temporary_path(output_path)
+    try:
+        _encode_to_path(video, audio, num_frames, frame_rate, temporary_path)
+        temporary_path.replace(output_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def _publish_fast_result(result: FastVideoResult, artifact_path: Path, output_path: Path) -> None:
+    """Publish a preview and its artifact only after both temporary writes finish."""
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_artifact_path = _temporary_path(artifact_path)
+    temporary_video_path = _temporary_path(output_path)
+    try:
+        result.artifact.save(temporary_artifact_path)
+        _encode_to_path(
+            result.video,
+            result.audio,
+            result.artifact.num_frames,
+            result.artifact.frame_rate,
+            temporary_video_path,
+        )
+        temporary_artifact_path.replace(artifact_path)
+        temporary_video_path.replace(output_path)
+    finally:
+        temporary_artifact_path.unlink(missing_ok=True)
+        temporary_video_path.unlink(missing_ok=True)
+
+
+def _encode_to_path(
+    video: Iterator[torch.Tensor], audio: Audio, num_frames: int, frame_rate: float, output_path: Path
+) -> None:
+    """Encode media to an already-created final or temporary destination path."""
     encode_video(
         video=video,
         fps=frame_rate,
@@ -468,6 +507,11 @@ def _encode(
         output_path=str(output_path),
         video_chunks_number=get_video_chunks_number(num_frames, TilingConfig.default()),
     )
+
+
+def _temporary_path(path: Path) -> Path:
+    """Return a same-directory temporary path that retains the media suffix."""
+    return path.with_name(f".{path.stem}.tmp{path.suffix}")
 
 
 if __name__ == "__main__":

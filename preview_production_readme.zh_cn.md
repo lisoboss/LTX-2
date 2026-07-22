@@ -25,7 +25,7 @@ uv sync --frozen
 uv run python preview_production.py --help
 ```
 
-脚本默认使用 `--offload cpu`：完整 Transformer 权重固定在系统内存、按层传输到 GPU，适用于 12 GB 显存，但通常需要约 36 GB 系统内存。若系统内存不足，改用 `--offload disk`（更慢，但约需 5 GB 系统内存）；只有显存约 28 GB 或更高时才使用 `--offload none`。
+脚本默认使用 `--offload disk`：权重按需从磁盘读取，只保留少量 pinned CPU buffer，适用于 12 GB 显存和有限系统内存，但速度最慢。`--offload cpu` 会把完整权重预加载到 pinned 系统内存（通常约需 36 GB）；只有显存约 28 GB 或更高时才使用 `--offload none`。
 
 ## 模型目录
 
@@ -54,7 +54,7 @@ uv run python preview_production.py fast \
   --prompt "A red fox runs through a snowy forest, cinematic tracking shot" \
   --duration-seconds 5 \
   --artifact-path outputs/preview.pt \
-  --offload cpu \
+  --offload disk \
   --output-path outputs/preview.mp4 \
   --seed 42
 ```
@@ -69,7 +69,7 @@ uv run python preview_production.py fast \
 uv run python preview_production.py production \
   --model-root /path/to/models \
   --artifact-path outputs/preview.pt \
-  --offload cpu \
+  --offload disk \
   --output-path outputs/production.mp4
 ```
 
@@ -85,10 +85,20 @@ uv run python preview_production.py modify \
   --preview-video-path outputs/preview.mp4 \
   --prompt "The same fox pauses, looks into the camera, then walks away" \
   --duration-seconds 5 \
-  --offload cpu \
+  --offload disk \
   --output-path outputs/modified.mp4 \
   --seed 42
 ```
+
+## 一次执行完整工作流（可恢复）
+
+`run_preview_production_workflow.sh` 依次执行上述三个阶段。每个阶段完成后在输出目录写入一个 `.done` 成功标志；重复执行时，标志和输出文件都存在的阶段会跳过。fast 重新执行时会清除 production 与 modify 的成功标志。
+
+```bash
+./run_preview_production_workflow.sh
+```
+
+默认参数写在 Bash 脚本顶部：模型目录 `./models`、时长 5 秒、seed 42、`disk` offload，以及两个 fox prompt。按需直接修改对应变量。输出目录包含 `preview.mp4`、`preview.pt`、`production.mp4`、`modified.mp4`，以及 `fast.done`、`production.done`、`modify.done`。命令失败不会写成功标志；下次运行会从失败阶段继续。删除某个 `.done` 文件可强制重跑该阶段。
 
 ## 时长与帧数
 
