@@ -38,6 +38,7 @@ DEFAULT_SEED = 10
 
 DISTILLED_CHECKPOINT_RELATIVE_PATH = Path("LTX-2.3/ltx-2.3-22b-distilled-1.1.safetensors")
 SPATIAL_UPSAMPLER_RELATIVE_PATH = Path("LTX-2.3/ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
+DISTILLED_LORA_RELATIVE_PATH = Path("LTX-2.3/ltx-2.3-22b-distilled-lora-384-1.1.safetensors")
 GEMMA_RELATIVE_PATH = Path("gemma-3-12b-it-qat-q4_0-unquantized")
 IC_LORA_RELATIVE_PATH = Path("LTX-2.3/ltx-2.3-22b-ic-lora-union-control.safetensors")
 
@@ -348,7 +349,13 @@ def _make_distilled_pipeline(model_root: Path) -> DistilledPipeline:
         distilled_checkpoint_path=str(model_root / DISTILLED_CHECKPOINT_RELATIVE_PATH),
         gemma_root=str(model_root / GEMMA_RELATIVE_PATH),
         spatial_upsampler_path=str(model_root / SPATIAL_UPSAMPLER_RELATIVE_PATH),
-        loras=[],
+        loras=[
+            LoraPathStrengthAndSDOps(
+                str(model_root / DISTILLED_LORA_RELATIVE_PATH),
+                1.0,
+                LTXV_LORA_COMFY_RENAMING_MAP,
+            )
+        ],
     )
 
 
