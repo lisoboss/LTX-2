@@ -1,0 +1,11 @@
+[project]
+name = "ltx-api"
+version = "0.1.0"
+description = "Safe three-stage Python API for LTX-2 preview, production, and enhancement"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["ltx-core", "ltx-pipelines"]
+
+[build-system]
+requires = ["uv_build>=0.9.8,<0.10.0"]
+build-backend = "uv_build"

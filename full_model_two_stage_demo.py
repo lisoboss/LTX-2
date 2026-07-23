@@ -34,8 +34,24 @@ GEMMA_RELATIVE_PATH = Path("gemma-3-12b-it-qat-q4_0-unquantized")
 HEIGHT = 768
 WIDTH = 1280
 FRAME_RATE = 24.0
-DEFAULT_STAGE_1_STEPS = 8
+DEFAULT_STAGE_1_STEPS = 30
 DEFAULT_OFFLOAD = OffloadMode.DISK
+VIDEO_GUIDER_PARAMS = MultiModalGuiderParams(
+    cfg_scale=3.0,
+    stg_scale=1.0,
+    rescale_scale=0.7,
+    modality_scale=3.0,
+    skip_step=0,
+    stg_blocks=[28],
+)
+AUDIO_GUIDER_PARAMS = MultiModalGuiderParams(
+    cfg_scale=7.0,
+    stg_scale=1.0,
+    rescale_scale=0.7,
+    modality_scale=3.0,
+    skip_step=0,
+    stg_blocks=[28],
+)
 
 
 def duration_to_num_frames(duration_seconds: float) -> int:
@@ -82,8 +98,8 @@ def generate(
         num_frames=num_frames,
         frame_rate=FRAME_RATE,
         num_inference_steps=stage_1_steps,
-        video_guider_params=MultiModalGuiderParams(),
-        audio_guider_params=MultiModalGuiderParams(),
+        video_guider_params=VIDEO_GUIDER_PARAMS,
+        audio_guider_params=AUDIO_GUIDER_PARAMS,
         images=[],
         tiling_config=TilingConfig.default(),
     )
