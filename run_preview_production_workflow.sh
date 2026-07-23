@@ -10,6 +10,7 @@ duration_seconds=5
 output_dir=outputs/fox-workflow
 seed=42
 offload=disk
+workflow_version=2
 
 uv_bin=${UV_BIN:-uv}
 if ! command -v "$uv_bin" >/dev/null 2>&1; then
@@ -38,7 +39,7 @@ run_command() {
   "$@"
 }
 
-if [[ -f "$output_dir/fast.done" && -s "$output_dir/preview.mp4" && -s "$output_dir/preview.pt" ]]; then
+if [[ -f "$output_dir/fast.done" && "$(<"$output_dir/fast.done")" == "$workflow_version" && -s "$output_dir/preview.mp4" && -s "$output_dir/preview.pt" ]]; then
   echo "[skip] fast"
 else
   rm -f "$output_dir/production.done" "$output_dir/modify.done"
@@ -50,11 +51,11 @@ else
     --artifact-path "$output_dir/preview.pt" \
     --output-path "$output_dir/preview.mp4" \
     --seed "$seed"
-  touch "$output_dir/fast.done"
+  printf '%s\n' "$workflow_version" > "$output_dir/fast.done"
   echo "[success] fast"
 fi
 
-if [[ -f "$output_dir/production.done" && -s "$output_dir/production.mp4" ]]; then
+if [[ -f "$output_dir/production.done" && "$(<"$output_dir/production.done")" == "$workflow_version" && -s "$output_dir/production.mp4" ]]; then
   echo "[skip] production"
 else
   run_command "$uv_bin" run python preview_production.py production \
@@ -62,11 +63,11 @@ else
     --offload "$offload" \
     --artifact-path "$output_dir/preview.pt" \
     --output-path "$output_dir/production.mp4"
-  touch "$output_dir/production.done"
+  printf '%s\n' "$workflow_version" > "$output_dir/production.done"
   echo "[success] production"
 fi
 
-if [[ -f "$output_dir/modify.done" && -s "$output_dir/modified.mp4" ]]; then
+if [[ -f "$output_dir/modify.done" && "$(<"$output_dir/modify.done")" == "$workflow_version" && -s "$output_dir/modified.mp4" ]]; then
   echo "[skip] modify"
 else
   run_command "$uv_bin" run python preview_production.py modify \
@@ -77,7 +78,7 @@ else
     --duration-seconds "$duration_seconds" \
     --output-path "$output_dir/modified.mp4" \
     --seed "$seed"
-  touch "$output_dir/modify.done"
+  printf '%s\n' "$workflow_version" > "$output_dir/modify.done"
   echo "[success] modify"
 fi
 

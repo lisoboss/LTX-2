@@ -24,9 +24,9 @@
 | 27 | 分辨率与 conditioning helper | 验证二阶段尺寸，并构造图像条件。 |
 | 28 | `encode_video` | 把惰性帧和音频写成 MP4。 |
 | 29 | `ModalitySpec`、`OffloadMode` | 前者描述视频/音频 latent 输入；后者选择 none/cpu/disk 权重流式模式。 |
-| 31 | `ARTIFACT_VERSION` | artifact 格式版本；不兼容格式会被拒绝。 |
+| 31 | `ARTIFACT_VERSION` | artifact 格式版本；当前为 2，因为新增了 generator state。旧 artifact 会被明确拒绝。 |
 | 32–35 | preview/production 尺寸 | preview 解码为 384×640；artifact 的最终目标是 768×1280。 |
-| 36–38 | FPS、seed、offload 默认值 | 固定 24 FPS、seed 10、磁盘流式以适配低显存 GPU。 |
+| 36–39 | FPS、seed、offload、preview sigma 默认值 | 固定 24 FPS、seed 10、磁盘流式以适配低显存 GPU；`FAST_PREVIEW_SIGMAS` 每隔一个 sigma 取样，形成 4 步预览 schedule。 |
 | 40–44 | 模型相对路径常量 | 所有路径以 `--model-root` 为根；包括 checkpoint、upscaler、distilled LoRA、Gemma 与 IC-LoRA。 |
 
 ## 2. 时长、帧数与 artifact（47–124）
@@ -40,13 +40,13 @@
 | 56 | `((n - 1)//scale)*scale + 1` | 向下对齐为 `8k+1` 帧，满足因果时间 VAE。 |
 | 57–58 | 最小帧数检查 | 少于一个时间组时给出明确错误。 |
 | 62 | `DistilledStage1Artifact` | 定义可跨进程保存的 Stage 1 状态。 |
-| 66–67 | `video_latent`、`audio_latent` | 保存 Stage 1 已采样的两种 latent，供 Stage 2 继续。 |
+| 66–68 | `video_latent`、`audio_latent`、`generator_state` | 保存 Stage 1 两种 latent，以及 Stage 1 结束时的随机数状态，供 Stage 2 继续。 |
 | 68–73 | prompt、seed、尺寸、帧数、FPS | 保存重建 Stage 2 prompt context 和验证兼容性所需元数据。 |
 | 74 | `version` | 默认写入当前 artifact 格式版本。 |
 | 76–77 | `__post_init__` | 每次新建或加载 artifact 都立即验证。 |
 | 79–94 | `save` | 创建父目录，将所有 tensor 拷到 CPU，再写入同目录临时文件。 |
 | 81–82 | `Path` 与 `mkdir` | 允许 `outputs/...` 这类尚不存在的目录。 |
-| 83–93 | `payload` | 只保存安全的标量、字符串和 CPU contiguous tensor。 |
+| 83–94 | `payload` | 保存安全的标量、字符串和 CPU contiguous tensor，包括 generator state。 |
 | 94 | `torch.save` | 写入临时 artifact，而非直接覆盖最终 artifact。 |
 | 95–97 | `replace`/`finally` | 成功时原子替换；失败时删除临时文件。 |
 | 100–115 | `load` | 用 `weights_only=True` 在 CPU 加载，检查 schema 后重建 artifact。 |
@@ -68,9 +68,9 @@
 | 155–159 | `prompt_encoder` | 获取 video/audio 文本 context；可选地把第一张图用于 prompt enhancement。 |
 | 160 | `height//2`、`width//2` | Stage 1 仅生成低清 latent。 |
 | 161–170 | `image_conditioner` | 临时创建 VAE encoder，并把图像转换成 Stage 1 尺寸的条件。 |
-| 171–181 | `pipeline.stage(...)` | 真正执行 Stage 1 扩散；没有 upsampler、没有 Stage 2 sigma。 |
+| 171–181 | `pipeline.stage(...)` | 真正执行 Stage 1 扩散；fast 功能层传入 4 步 preview sigma，没有 upsampler、没有 Stage 2 sigma。 |
 | 172–180 | denoiser/sigma/noiser/modality | 分别提供文本预测器、8 步 schedule、随机源、视频与音频输入规范。 |
-| 182–191 | `DistilledStage1Artifact(...)` | 立即将 latent detach 并转 CPU，保证 artifact 不持有 GPU 显存。 |
+| 182–192 | `DistilledStage1Artifact(...)` | 立即将 latent detach 并转 CPU，同时在 preview 解码前捕获 generator state，保证 Stage 2 可恢复原始随机序列。 |
 | 192–196 | `FastVideoResult(...)` | 返回解码视频、解码音频和 artifact。视频用 `_inference_iterator` 包装，解决惰性解码时 inference mode 已退出的问题。 |
 
 ## 4. Stage 2：从 artifact 继续，不重跑 Stage 1（198–255）
@@ -80,7 +80,7 @@
 | 198 | `@torch.inference_mode()` | Stage 2 主体关闭梯度。 |
 | 199–206 | `run_stage_2` | 只接收 artifact；图像条件和 tiling 可选。 |
 | 208 | `_validate_artifact` | 拒绝版本、形状、尺寸或帧数不兼容的 artifact。 |
-| 209–212 | pipeline/随机源 | 用 artifact seed 重建生成器和 noiser。 |
+| 209–217 | pipeline/随机源 | 先以 artifact seed 重建 generator，再用 artifact generator state 覆盖其状态，随后创建 noiser。 |
 | 213–217 | 再次 prompt encode | artifact 保存文本而不保存设备相关 context；因此可跨进程恢复。 |
 | 218–219 | `.to(device, dtype)` | 只在需要 Stage 2 时把 CPU latent 移回当前 GPU。 |
 | 220 | `pipeline.upsampler` | 对 Stage 1 视频 latent 做空间上采样；这正是 Stage 2 的起点。 |
@@ -102,7 +102,7 @@
 | 285 | `images=[]` | 修改入口不附加图像条件。 |
 | 286 | `video_conditioning` | IC-LoRA 实际读取并编码 preview 视频的位置。 |
 | 290 | `_inference_iterator` | 修复 IC-LoRA 惰性 VAE 解码的 inference tensor 错误。 |
-| 292–307 | `LTX2FastVideo` | 仅需 model root/offload；`generate` 固定生产目标尺寸，输出其中一半分辨率 preview。 |
+| 292–314 | `LTX2FastVideo` | 仅需 model root/offload；`generate` 固定生产目标尺寸，输出其中一半分辨率 preview，并明确传入 4 步 `FAST_PREVIEW_SIGMAS`。 |
 | 310–320 | `LTX2HighResolutionVideo` | 加载同一类 Pipeline；先验证 artifact 是固定 768×1280、24 FPS，再执行 Stage 2。 |
 | 323–346 | `LTX2VideoModify` | 加载 IC-LoRA Pipeline；把时长转换为帧数后调用修改 adapter。 |
 

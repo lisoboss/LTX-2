@@ -46,7 +46,7 @@ uv run python preview_production.py --help
 
 ## 1. 生成快速预览
 
-`fast` 仅执行 Distilled Stage 1：在 `384×640` 解码 preview，同时保存用于后续 Stage 2 的 CPU latent artifact。artifact 包含 prompt、seed、最终目标尺寸、帧数、帧率和版本信息。
+`fast` 仅执行 Distilled Stage 1：在 `384×640` 解码 preview，同时保存用于后续 Stage 2 的 CPU latent artifact。为减少前期试错成本，fast 使用固定 4 步 preview sigma schedule（生产仍使用完整的 Stage 2 精修 schedule）。artifact 包含 prompt、seed、Stage 1 结束时的随机生成器状态、最终目标尺寸、帧数、帧率和版本信息。
 
 ```bash
 uv run python preview_production.py fast \
@@ -73,7 +73,7 @@ uv run python preview_production.py production \
   --output-path outputs/production.mp4
 ```
 
-artifact 使用 `torch.save` 保存，但加载时启用 `weights_only=True`，并强制在 CPU 恢复后才移动到当前 Pipeline 设备。它可以被复制到另一进程或另一台机器继续执行；两端应使用兼容的模型版本与本脚本版本。
+artifact 使用 `torch.save` 保存，但加载时启用 `weights_only=True`，并强制在 CPU 恢复后才移动到当前 Pipeline 设备。它可以被复制到另一进程或另一台机器继续执行；两端应使用兼容的模型版本与本脚本版本。artifact 还保存 Stage 1 完成时的 generator state，Stage 2 恢复它后可沿用原版一次性两阶段流程的随机序列。
 
 ## 3. 基于 preview 修改视频
 

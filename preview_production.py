@@ -28,7 +28,7 @@ from ltx_pipelines.utils.helpers import assert_resolution, combined_image_condit
 from ltx_pipelines.utils.media_io import encode_video
 from ltx_pipelines.utils.types import ModalitySpec, OffloadMode
 
-ARTIFACT_VERSION = 1
+ARTIFACT_VERSION = 2
 PREVIEW_HEIGHT = 384
 PREVIEW_WIDTH = 640
 PRODUCTION_HEIGHT = PREVIEW_HEIGHT * 2
@@ -36,6 +36,7 @@ PRODUCTION_WIDTH = PREVIEW_WIDTH * 2
 FRAME_RATE = 24.0
 DEFAULT_SEED = 10
 DEFAULT_OFFLOAD_MODE = OffloadMode.DISK
+FAST_PREVIEW_SIGMAS = DISTILLED_SIGMAS[::2]
 
 DISTILLED_CHECKPOINT_RELATIVE_PATH = Path("LTX-2.3/ltx-2.3-22b-distilled-1.1.safetensors")
 SPATIAL_UPSAMPLER_RELATIVE_PATH = Path("LTX-2.3/ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
@@ -65,6 +66,7 @@ class DistilledStage1Artifact:
 
     video_latent: torch.Tensor
     audio_latent: torch.Tensor
+    generator_state: torch.Tensor
     prompt: str
     seed: int
     height: int
@@ -85,6 +87,7 @@ class DistilledStage1Artifact:
             "version": self.version,
             "video_latent": self.video_latent.detach().to(device="cpu").contiguous(),
             "audio_latent": self.audio_latent.detach().to(device="cpu").contiguous(),
+            "generator_state": self.generator_state.detach().to(device="cpu").contiguous(),
             "prompt": self.prompt,
             "seed": self.seed,
             "height": self.height,
@@ -108,6 +111,7 @@ class DistilledStage1Artifact:
             "version",
             "video_latent",
             "audio_latent",
+            "generator_state",
             "prompt",
             "seed",
             "height",
@@ -187,6 +191,7 @@ class PreviewProductionPipeline:
         artifact = DistilledStage1Artifact(
             video_latent=video_state.latent.detach().to(device="cpu"),
             audio_latent=audio_state.latent.detach().to(device="cpu"),
+            generator_state=generator.get_state().detach().to(device="cpu"),
             prompt=prompt,
             seed=seed,
             height=height,
@@ -214,6 +219,7 @@ class PreviewProductionPipeline:
         pipeline = self._pipeline
         images = images or []
         generator = torch.Generator(device=pipeline.device).manual_seed(artifact.seed)
+        generator.set_state(artifact.generator_state)
         noiser = GaussianNoiser(generator=generator)
         (context,) = pipeline.prompt_encoder(
             [artifact.prompt],
@@ -310,6 +316,7 @@ class LTX2FastVideo:
             width=PRODUCTION_WIDTH,
             num_frames=duration_to_num_frames(duration_seconds),
             frame_rate=FRAME_RATE,
+            stage_1_sigmas=FAST_PREVIEW_SIGMAS,
         )
 
 
@@ -386,6 +393,8 @@ def _validate_artifact(artifact: DistilledStage1Artifact) -> None:
         raise ValueError("artifact video_latent must be a five-dimensional tensor")
     if not isinstance(artifact.audio_latent, torch.Tensor) or artifact.audio_latent.ndim < 3:
         raise ValueError("artifact audio_latent must be a tensor with at least three dimensions")
+    if not isinstance(artifact.generator_state, torch.Tensor) or artifact.generator_state.ndim != 1:
+        raise ValueError("artifact generator_state must be a one-dimensional tensor")
     if artifact.video_latent.shape[0] != 1 or artifact.audio_latent.shape[0] != 1:
         raise ValueError("stage-1 artifacts must have batch size 1")
     assert_resolution(height=artifact.height, width=artifact.width, is_two_stage=True)
