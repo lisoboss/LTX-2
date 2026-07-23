@@ -37,12 +37,13 @@ uv run python preview_production.py --help
 │   ├── ltx-2.3-22b-distilled-1.1.safetensors
 │   ├── ltx-2.3-22b-distilled-lora-384-1.1.safetensors
 │   ├── ltx-2.3-spatial-upscaler-x2-1.1.safetensors
-│   └── ltx-2.3-22b-ic-lora-union-control.safetensors
+├── LoRA/
+│   └── ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors
 └── gemma-3-12b-it-qat-q4_0-unquantized/
     └── # Gemma 3 文本编码器的完整下载内容
 ```
 
-请确认 IC-LoRA 的下载文件名。若实际文件名不同，需要修改 `preview_production.py` 中的 `IC_LORA_RELATIVE_PATH` 常量；其余调用参数不需要携带模型路径或推理配置。
+IC-LoRA 固定使用 `LoRA/ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors`；其余调用参数不需要携带模型路径或推理配置。
 
 ## 1. 生成快速预览
 
