@@ -266,17 +266,17 @@ class PreviewProductionPipeline:
         )
 
 
-class PreviewVideoModifyPipeline:
-    """Production-mode preview editing adapter for an existing IC-LoRA pipeline."""
+class ProductionVideoEnhancePipeline:
+    """IC-LoRA adapter that uses a finished production video as the reference."""
 
     def __init__(self, pipeline: ICLoraPipeline) -> None:
         self._pipeline = pipeline
 
     @torch.inference_mode()
-    def modify_preview(
+    def enhance_production(
         self,
         *,
-        preview_video_path: str | Path,
+        production_video_path: str | Path,
         prompt: str,
         seed: int,
         height: int,
@@ -285,7 +285,7 @@ class PreviewVideoModifyPipeline:
         frame_rate: float,
         tiling_config: TilingConfig | None = None,
     ) -> tuple[Iterator[torch.Tensor], Audio]:
-        """Modify a preview while always retaining the IC-LoRA production stage."""
+        """Regenerate an enhanced production candidate through IC-LoRA conditioning."""
         video, audio = self._pipeline(
             prompt=prompt,
             seed=seed,
@@ -294,7 +294,7 @@ class PreviewVideoModifyPipeline:
             num_frames=num_frames,
             frame_rate=frame_rate,
             images=[],
-            video_conditioning=[(str(preview_video_path), 1.0)],
+            video_conditioning=[(str(production_video_path), 1.0)],
             tiling_config=tiling_config,
             skip_stage_2=False,
         )
@@ -333,23 +333,23 @@ class LTX2HighResolutionVideo:
         return self._adapter.run_stage_2(artifact)
 
 
-class LTX2VideoModify:
-    """Model-root-only IC-LoRA preview modification feature."""
+class LTX2VideoEnhance:
+    """Model-root-only IC-LoRA enhancement feature for an existing production video."""
 
     def __init__(self, model_root: Path, offload_mode: OffloadMode = DEFAULT_OFFLOAD_MODE) -> None:
         self.model_root = Path(model_root)
-        self._adapter = PreviewVideoModifyPipeline(_make_ic_lora_pipeline(self.model_root, offload_mode))
+        self._adapter = ProductionVideoEnhancePipeline(_make_ic_lora_pipeline(self.model_root, offload_mode))
 
     def generate(
         self,
         *,
-        preview_video_path: str | Path,
+        production_video_path: str | Path,
         prompt: str,
         duration_seconds: float,
         seed: int | None = None,
     ) -> tuple[Iterator[torch.Tensor], Audio]:
-        return self._adapter.modify_preview(
-            preview_video_path=preview_video_path,
+        return self._adapter.enhance_production(
+            production_video_path=production_video_path,
             prompt=prompt,
             seed=DEFAULT_SEED if seed is None else seed,
             height=PRODUCTION_HEIGHT,
@@ -427,13 +427,13 @@ def main() -> None:
     production_parser.add_argument("--artifact-path", required=True, type=Path)
     production_parser.add_argument("--output-path", required=True, type=Path)
 
-    modify_parser = subparsers.add_parser("modify", help="Modify a preview through IC-LoRA")
-    _add_model_arguments(modify_parser)
-    modify_parser.add_argument("--preview-video-path", required=True, type=Path)
-    modify_parser.add_argument("--prompt", required=True)
-    modify_parser.add_argument("--duration-seconds", required=True, type=float)
-    modify_parser.add_argument("--output-path", required=True, type=Path)
-    modify_parser.add_argument("--seed", type=int)
+    enhance_parser = subparsers.add_parser("enhance", help="Enhance a production video through IC-LoRA")
+    _add_model_arguments(enhance_parser)
+    enhance_parser.add_argument("--production-video-path", required=True, type=Path)
+    enhance_parser.add_argument("--prompt", required=True)
+    enhance_parser.add_argument("--duration-seconds", required=True, type=float)
+    enhance_parser.add_argument("--output-path", required=True, type=Path)
+    enhance_parser.add_argument("--seed", type=int)
 
     args = parser.parse_args()
     if args.command == "fast":
@@ -448,8 +448,8 @@ def main() -> None:
         video, audio = LTX2HighResolutionVideo(args.model_root, args.offload).generate(artifact=artifact)
         _encode(video, audio, artifact.num_frames, artifact.frame_rate, args.output_path)
     else:
-        video, audio = LTX2VideoModify(args.model_root, args.offload).generate(
-            preview_video_path=args.preview_video_path,
+        video, audio = LTX2VideoEnhance(args.model_root, args.offload).generate(
+            production_video_path=args.production_video_path,
             prompt=args.prompt,
             duration_seconds=args.duration_seconds,
             seed=args.seed,

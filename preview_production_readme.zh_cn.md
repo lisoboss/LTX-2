@@ -8,7 +8,7 @@ prompt + 时长
                            └─ production ──→ production.mp4
 
 preview.mp4 + 新 prompt
-  └─ modify ──→ modified.mp4
+  └─ enhance ──→ enhanced.mp4
 ```
 
 ## 环境准备
@@ -78,28 +78,28 @@ artifact 使用 `torch.save` 保存，但加载时启用 `weights_only=True`，�
 
 ## 3. 基于 preview 修改视频
 
-`modify` 把 preview 视频作为现有 `ICLoraPipeline` 的 video conditioning 输入，并固定执行 Stage 2。因此输出为生产分辨率，而不是内部低清预览。
+`enhance` 把 `production.mp4` 作为现有 `ICLoraPipeline` 的 video conditioning 输入，并固定执行 Stage 2。因此输出为生产分辨率，而不是内部低清预览。它是基于成片的受控重新生成，不是无损的像素级后处理。
 
 ```bash
-uv run python preview_production.py modify \
+uv run python preview_production.py enhance \
   --model-root /path/to/models \
-  --preview-video-path outputs/preview.mp4 \
+  --production-video-path outputs/production.mp4 \
   --prompt "The same fox pauses, looks into the camera, then walks away" \
   --duration-seconds 5 \
   --offload disk \
-  --output-path outputs/modified.mp4 \
+  --output-path outputs/enhanced.mp4 \
   --seed 42
 ```
 
 ## 一次执行完整工作流（可恢复）
 
-`run_preview_production_workflow.sh` 依次执行上述三个阶段。每个阶段完成后在输出目录写入一个 `.done` 成功标志；重复执行时，标志和输出文件都存在的阶段会跳过。fast 重新执行时会清除 production 与 modify 的成功标志。
+`run_preview_production_workflow.sh` 依次执行上述三个阶段。每个阶段完成后在输出目录写入一个 `.done` 成功标志；重复执行时，标志和输出文件都存在的阶段会跳过。fast 重新执行时会清除 production 与 enhance 的成功标志。
 
 ```bash
 ./run_preview_production_workflow.sh
 ```
 
-默认参数写在 Bash 脚本顶部：模型目录 `./models`、时长 5 秒、seed 42、`disk` offload，以及两个 fox prompt。按需直接修改对应变量。输出目录包含 `preview.mp4`、`preview.pt`、`production.mp4`、`modified.mp4`，以及 `fast.done`、`production.done`、`modify.done`。命令失败不会写成功标志；下次运行会从失败阶段继续。删除某个 `.done` 文件可强制重跑该阶段。
+默认参数写在 Bash 脚本顶部：模型目录 `./models`、时长 5 秒、seed 42、`disk` offload，以及两个 fox prompt。按需直接修改对应变量。输出目录包含 `preview.mp4`、`preview.pt`、`production.mp4`、`enhanced.mp4`，以及 `fast.done`、`production.done`、`enhance.done`。命令失败不会写成功标志；下次运行会从失败阶段继续。删除某个 `.done` 文件可强制重跑该阶段。
 
 ## 时长与帧数
 

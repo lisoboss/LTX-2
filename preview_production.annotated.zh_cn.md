@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 1–6 | 模块 docstring | 说明本文件是对原有 LTX Pipeline 的组合封装，不改包内实现。 |
 | 8 | `from __future__ import annotations` | 延迟解析类型注解，使注解可引用后面定义的类。 |
-| 10 | `import argparse` | 提供 `fast`、`production`、`modify` 三个 CLI 子命令。 |
+| 10 | `import argparse` | 提供 `fast`、`production`、`enhance` 三个 CLI 子命令。 |
 | 11 | `Iterator` | 标记视频是惰性帧迭代器，而不是一次性加载的完整视频。 |
 | 12 | `dataclass` | 定义 artifact 与快速结果这两个数据容器。 |
 | 13 | `Path` | 统一处理模型、artifact 和视频输出路径。 |
@@ -97,14 +97,14 @@
 | --- | --- | --- |
 | 258–262 | `PreviewVideoModifyPipeline` | 包装既有 `ICLoraPipeline`，不复制其 conditioning 实现。 |
 | 264 | inference decorator | 修改流程不需要梯度。 |
-| 265–276 | `modify_preview` 参数 | 明确传入 preview 路径、新 prompt、生成规格。 |
-| 278–289 | `self._pipeline(...)` | 将 preview 作为唯一 `video_conditioning`，强度 1.0，且固定 `skip_stage_2=False`。 |
+| 265–276 | `enhance_production` 参数 | 明确传入 production 路径、优化 prompt、生成规格。 |
+| 278–289 | `self._pipeline(...)` | 将 production 作为唯一 `video_conditioning`，强度 1.0，且固定 `skip_stage_2=False`。 |
 | 285 | `images=[]` | 修改入口不附加图像条件。 |
-| 286 | `video_conditioning` | IC-LoRA 实际读取并编码 preview 视频的位置。 |
+| 286 | `video_conditioning` | IC-LoRA 实际读取并编码 production 成片的位置。 |
 | 290 | `_inference_iterator` | 修复 IC-LoRA 惰性 VAE 解码的 inference tensor 错误。 |
 | 292–314 | `LTX2FastVideo` | 仅需 model root/offload；`generate` 固定生产目标尺寸，输出其中一半分辨率 preview，并明确传入 4 步 `FAST_PREVIEW_SIGMAS`。 |
 | 310–320 | `LTX2HighResolutionVideo` | 加载同一类 Pipeline；先验证 artifact 是固定 768×1280、24 FPS，再执行 Stage 2。 |
-| 323–346 | `LTX2VideoModify` | 加载 IC-LoRA Pipeline；把时长转换为帧数后调用修改 adapter。 |
+| 323–346 | `LTX2VideoEnhance` | 加载 IC-LoRA Pipeline；把时长转换为帧数后调用优化 adapter。 |
 
 ## 6. 模型构造与 artifact 校验（349–394）
 
@@ -125,11 +125,11 @@
 | 397–400 | `main` 与 subparsers | 创建命令行入口和必须选择的子命令。 |
 | 402–408 | `fast` 参数 | 要求 prompt、时长、artifact 输出、视频输出；seed 可选。 |
 | 410–413 | `production` 参数 | 仅需要 artifact 输入与生产视频输出。 |
-| 415–421 | `modify` 参数 | 要求 preview 视频、新 prompt、时长和输出。 |
+| 415–421 | `enhance` 参数 | 要求 production 视频、优化 prompt、时长和输出。 |
 | 423 | `parse_args` | 将 shell 参数解析成 `args`。 |
 | 424–431 | fast 分支 | 调用 Stage 1，再由 `_publish_fast_result` 成对发布 artifact 与 preview。 |
 | 432–435 | production 分支 | 加载 artifact，调用 Stage 2，然后原子写入生产视频。 |
-| 436–443 | modify 分支 | 调用 IC-LoRA 修改，按相同 duration 规则原子写入 modified 视频。 |
+| 436–443 | enhance 分支 | 调用 IC-LoRA 优化，按相同 duration 规则原子写入 enhanced 视频。 |
 | 446–454 | `_add_model_arguments` | 三个子命令共享 model root 和 offload 参数；默认 `disk`。 |
 
 ## 8. 原子输出与惰性解码（457–525）
@@ -155,5 +155,5 @@
 
 1. `fast`：文本 → 低清 Stage 1 latent → CPU artifact + preview MP4。
 2. `production`：读取 CPU artifact → spatial upsample → Stage 2 精修 → production MP4。
-3. `modify`：preview MP4 → IC-LoRA video conditioning → 两阶段修改 → modified MP4。
+3. `enhance`：production MP4 → IC-LoRA video conditioning → 两阶段优化 → enhanced MP4。
 4. `run_preview_production_workflow.sh` 通过 `.done` 文件跳过已成功阶段；每条外部命令和进度都写入带时间戳的 `workflow.log`。
