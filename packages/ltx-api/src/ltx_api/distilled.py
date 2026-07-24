@@ -49,7 +49,7 @@ class DistilledAdapter:
         sample_started = time.perf_counter()
         video_state, audio_state = pipeline.stage(
             denoiser=SimpleDenoiser(context.video_encoding, context.audio_encoding),
-            sigmas=DISTILLED_SIGMAS.to(torch.float32),
+            sigmas=DISTILLED_SIGMAS.to(dtype=torch.float32, device=pipeline.device),
             noiser=noiser,
             width=resolution.width // 2,
             height=resolution.height // 2,
@@ -94,7 +94,7 @@ class DistilledAdapter:
         upscaled = pipeline.upsampler(artifact.video_latent.to(pipeline.device, pipeline.dtype)[:1])
         video_state, audio_state = pipeline.stage(
             denoiser=SimpleDenoiser(context.video_encoding, context.audio_encoding),
-            sigmas=STAGE_2_DISTILLED_SIGMAS.to(torch.float32),
+            sigmas=STAGE_2_DISTILLED_SIGMAS.to(dtype=torch.float32, device=pipeline.device),
             noiser=noiser,
             width=artifact.resolution.width,
             height=artifact.resolution.height,
