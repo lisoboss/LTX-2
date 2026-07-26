@@ -105,7 +105,7 @@ def new_status(scene: ScenePrompt, seed: int) -> dict[str, Any]:
         "resolution": {"width": RESOLUTION[0], "height": RESOLUTION[1]},
         "seed": seed,
         "model": "22b-dev",
-        "quality": "fast",
+        "quality": "standard",
         "prompt": scene.full_prompt,
         "prompt_summary": scene.prompt[:180],
         "stages": {},
@@ -214,7 +214,7 @@ def render_scene(args: argparse.Namespace, scene: ScenePrompt, creator: VideoCre
                     .duration_seconds(scene.duration_seconds)
                     .resolution(*RESOLUTION)
                     .seed(seed)
-                    .quality("fast")
+                    .quality("standard")
                     .build()
                 )
                 result = creator.preview(
