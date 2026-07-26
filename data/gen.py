@@ -35,6 +35,7 @@ DEFAULT_MODEL_ROOT = REPOSITORY_ROOT / "models"
 DEFAULT_OUTPUT_ROOT = DATA_ROOT / "generated_recut_v1"
 RESOLUTION = (1280, 768)
 BASE_SEED = 42_000
+QUALITY_PRESETS = ("fast", "standard", "high")
 
 
 class Stage(str, Enum):
@@ -75,6 +76,12 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--stage", choices=list(Stage), default=Stage.FULL)
     result.add_argument("--model-root", type=Path, default=DEFAULT_MODEL_ROOT)
     result.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+    result.add_argument(
+        "--quality",
+        choices=QUALITY_PRESETS,
+        default="fast",
+        help="22B dev preview quality preset (default: fast)",
+    )
     result.add_argument("--force", action="store_true", help="rerun selected completed stages")
     result.add_argument("--dry-run", action="store_true", help="validate plan and files without loading models")
     return result
@@ -97,7 +104,7 @@ def status_path(directory: Path) -> Path:
     return directory / "status.json"
 
 
-def new_status(scene: ScenePrompt, seed: int) -> dict[str, Any]:
+def new_status(scene: ScenePrompt, seed: int, quality: str) -> dict[str, Any]:
     return {
         "scene": scene.number,
         "title": scene.title,
@@ -105,7 +112,7 @@ def new_status(scene: ScenePrompt, seed: int) -> dict[str, Any]:
         "resolution": {"width": RESOLUTION[0], "height": RESOLUTION[1]},
         "seed": seed,
         "model": "22b-dev",
-        "quality": "standard",
+        "quality": quality,
         "prompt": scene.full_prompt,
         "prompt_summary": scene.prompt[:180],
         "stages": {},
@@ -113,16 +120,20 @@ def new_status(scene: ScenePrompt, seed: int) -> dict[str, Any]:
     }
 
 
-def load_status(directory: Path, scene: ScenePrompt, seed: int) -> dict[str, Any]:
+def load_status(directory: Path, scene: ScenePrompt, seed: int, quality: str) -> dict[str, Any]:
     path = status_path(directory)
     if not path.exists():
-        return new_status(scene, seed)
+        return new_status(scene, seed, quality)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
         raise ValueError(f"invalid status file: {path}") from error
-    if payload.get("scene") != scene.number or payload.get("prompt") != scene.full_prompt:
-        raise ValueError(f"status does not match current scene prompt: {path}; choose a new --output-root")
+    if (
+        payload.get("scene") != scene.number
+        or payload.get("prompt") != scene.full_prompt
+        or payload.get("quality") != quality
+    ):
+        raise ValueError(f"status does not match current prompt or quality: {path}; choose a new --output-root")
     return payload
 
 
@@ -189,10 +200,11 @@ def render_scene(args: argparse.Namespace, scene: ScenePrompt, creator: VideoCre
     directory = scene_dir(args.output_root, scene)
     logger = SceneLogger(directory / "workflow.log")
     seed = BASE_SEED + scene.number
-    status = load_status(directory, scene, seed)
+    quality = getattr(args, "quality", "fast")
+    status = load_status(directory, scene, seed, quality)
     stages = requested_stages(Stage(args.stage))
     stage_names = ",".join(stage.value for stage in stages)
-    logger.write(f"scene={scene.number:02d} title={scene.title!r} stages={stage_names} seed={seed}")
+    logger.write(f"scene={scene.number:02d} title={scene.title!r} stages={stage_names} seed={seed} quality={quality}")
 
     for stage in stages:
         if completed(status, directory, stage) and not args.force:
@@ -214,7 +226,7 @@ def render_scene(args: argparse.Namespace, scene: ScenePrompt, creator: VideoCre
                     .duration_seconds(scene.duration_seconds)
                     .resolution(*RESOLUTION)
                     .seed(seed)
-                    .quality("standard")
+                    .quality(quality)
                     .build()
                 )
                 result = creator.preview(
@@ -269,7 +281,11 @@ def main() -> int:
         for path in missing:
             print(f"  - {path}", file=sys.stderr)
         return 2
-    print(f"[{timestamp()}] planned scenes={len(scenes)} stage={args.stage} output_root={args.output_root}", flush=True)
+    print(
+        f"[{timestamp()}] planned scenes={len(scenes)} stage={args.stage} quality={args.quality} "
+        f"output_root={args.output_root}",
+        flush=True,
+    )
     creator = None if args.dry_run else VideoCreator(args.model_root, offload_mode=OffloadMode.DISK)
     success = True
     for scene in scenes:
