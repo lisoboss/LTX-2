@@ -38,5 +38,7 @@ file = "last.png"
 uv run python data/gen.py --scene 1 --stage full --keyframe-root data/keyframes
 ```
 
-每个图片应先由外部图像生成流程制作并人工确认。`gen.py` 只经由
-`ltx-api` 把它们作为 I2V 条件传入 LTX，不生成或替换图片。
+每个图片应先由外部图像生成流程制作并人工确认。图片提示词在
+[`提示词.md`](提示词.md) 中，以中文按准确时点逐张编写；这与供 LTX 使用的英文
+视频运动提示词 `data/ltx_2_3_video_prompts.txt` 有意分离。`gen.py` 只经由
+`ltx-api` 把确认后的图片作为 I2V 条件传入 LTX，不生成或替换图片。

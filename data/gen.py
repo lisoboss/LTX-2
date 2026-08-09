@@ -4,6 +4,7 @@
 Examples:
     uv run python data/gen.py --scene 1 --stage full --keyframe-root data/keyframes
     uv run python data/gen.py --all --stage full --keyframe-root data/keyframes
+    uv run python data/gen.py --scene 1 --video-prompt-file data/ltx_2_3_video_prompts.txt --dry-run
     uv run python data/gen.py --all --stage full --dry-run
 
 Each scene writes independently under ``data/generated_recut_v1/scene_XX``. A stage is
@@ -16,6 +17,7 @@ import argparse
 import configparser
 import hashlib
 import json
+import re
 import sys
 import traceback
 from dataclasses import asdict, dataclass
@@ -27,8 +29,6 @@ from uuid import uuid4
 
 from ltx_api import QualityPreviewBuilder, VideoCreator
 from ltx_api.types import EnhanceResult, PreviewResult, ProductionResult
-from prompts_en import SCENES, SCENES_BY_NUMBER, ScenePrompt
-
 from ltx_pipelines.utils.types import OffloadMode
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
@@ -36,9 +36,11 @@ DATA_ROOT = Path(__file__).resolve().parent
 DEFAULT_MODEL_ROOT = REPOSITORY_ROOT / "models"
 DEFAULT_OUTPUT_ROOT = DATA_ROOT / "generated_recut_v1"
 DEFAULT_KEYFRAME_ROOT = DATA_ROOT / "keyframes"
+DEFAULT_VIDEO_PROMPT_FILE = DATA_ROOT / "ltx_2_3_video_prompts.txt"
 RESOLUTION = (1280, 768)
 BASE_SEED = 42_000
 QUALITY_PRESETS = ("fast", "standard", "high")
+PROMPT_HEADER = re.compile(r"^=== SCENE (?P<number>\d{2}) \| (?P<duration>\d+(?:\.\d+)?) \| (?P<title>.+) ===$")
 
 
 class Stage(str, Enum):
@@ -53,6 +55,18 @@ STAGE_FILES = {
     Stage.PRODUCTION: ("production.mp4",),
     Stage.ENHANCE: ("enhanced.mp4",),
 }
+
+
+@dataclass(frozen=True)
+class ScenePrompt:
+    number: int
+    title: str
+    duration_seconds: float
+    prompt: str
+
+    @property
+    def full_prompt(self) -> str:
+        return self.prompt
 
 
 def timestamp() -> str:
@@ -80,6 +94,12 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--model-root", type=Path, default=DEFAULT_MODEL_ROOT)
     result.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     result.add_argument(
+        "--video-prompt-file",
+        type=Path,
+        default=DEFAULT_VIDEO_PROMPT_FILE,
+        help="LTX I2V prompt text file, split by === SCENE NN | seconds | title ===",
+    )
+    result.add_argument(
         "--keyframe-root",
         type=Path,
         default=DEFAULT_KEYFRAME_ROOT,
@@ -96,13 +116,55 @@ def parser() -> argparse.ArgumentParser:
     return result
 
 
-def target_scenes(args: argparse.Namespace) -> tuple[ScenePrompt, ...]:
-    if args.all:
-        return SCENES
+def load_scenes(prompt_file: Path) -> tuple[ScenePrompt, ...]:
     try:
-        return (SCENES_BY_NUMBER[args.scene],)
-    except KeyError as error:
-        raise ValueError(f"unknown scene {args.scene}; choose a number from 1 through {len(SCENES)}") from error
+        lines = prompt_file.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise ValueError(f"unable to read video prompt file: {prompt_file}") from error
+
+    scenes: list[ScenePrompt] = []
+    header: re.Match[str] | None = None
+    body: list[str] = []
+
+    def finish_scene() -> None:
+        if header is None:
+            return
+        prompt = "\n".join(body).strip()
+        if not prompt:
+            raise ValueError(f"scene {header['number']} has an empty prompt: {prompt_file}")
+        scenes.append(ScenePrompt(int(header["number"]), header["title"], float(header["duration"]), prompt))
+
+    for line in lines:
+        match = PROMPT_HEADER.fullmatch(line)
+        if match is None:
+            if header is not None:
+                body.append(line)
+            continue
+        finish_scene()
+        header = match
+        body = []
+    finish_scene()
+
+    if not scenes:
+        raise ValueError(f"no scene delimiter found in video prompt file: {prompt_file}")
+    numbers = [scene.number for scene in scenes]
+    if len(numbers) != len(set(numbers)):
+        raise ValueError(f"duplicate scene number in video prompt file: {prompt_file}")
+    return tuple(scenes)
+
+
+# Compatibility for existing local tools that import the default storyboards.  The
+# editable source of truth remains the plain-text prompt file above, not Python.
+SCENES = load_scenes(DEFAULT_VIDEO_PROMPT_FILE)
+
+
+def target_scenes(args: argparse.Namespace, scenes: tuple[ScenePrompt, ...]) -> tuple[ScenePrompt, ...]:
+    if args.all:
+        return scenes
+    scenes_by_number = {scene.number: scene for scene in scenes}
+    if args.scene not in scenes_by_number:
+        raise ValueError(f"unknown scene {args.scene}; choose a number from 1 through {len(scenes)}")
+    return (scenes_by_number[args.scene],)
 
 
 def scene_dir(output_root: Path, scene: ScenePrompt) -> Path:
@@ -396,7 +458,7 @@ def render_scene(args: argparse.Namespace, scene: ScenePrompt, creator: VideoCre
 def main() -> int:
     args = parser().parse_args()
     try:
-        scenes = target_scenes(args)
+        scenes = target_scenes(args, load_scenes(args.video_prompt_file))
     except ValueError as error:
         parser().error(str(error))
     missing = validate_model_root(args.model_root)
