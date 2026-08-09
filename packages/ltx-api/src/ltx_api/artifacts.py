@@ -8,9 +8,9 @@ from uuid import uuid4
 
 import torch
 
-from ltx_api.types import ModelKind, VideoResolution
+from ltx_api.types import ImageKeyframe, ModelKind, VideoResolution
 
-ARTIFACT_VERSION = 1
+ARTIFACT_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,7 @@ class StageOneArtifact:
     num_inference_steps: int | None = None
     video_cfg_scale: float | None = None
     audio_cfg_scale: float | None = None
+    keyframes: tuple[ImageKeyframe, ...] = ()
 
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -37,6 +38,9 @@ class StageOneArtifact:
             "version": ARTIFACT_VERSION,
             "model": self.model.value,
             "resolution": (self.resolution.width, self.resolution.height),
+            "keyframes": tuple(
+                (str(keyframe.image_path), keyframe.frame_index, keyframe.strength) for keyframe in self.keyframes
+            ),
         }
         payload.update(
             {
@@ -54,9 +58,16 @@ class StageOneArtifact:
     @classmethod
     def load(cls, path: Path) -> StageOneArtifact:
         payload = torch.load(path, map_location="cpu", weights_only=True)
-        if not isinstance(payload, dict) or payload.pop("version", None) != ARTIFACT_VERSION:
+        if not isinstance(payload, dict):
+            raise ValueError("unsupported stage-one artifact")
+        version = payload.pop("version", None)
+        if version not in (1, ARTIFACT_VERSION):
             raise ValueError("unsupported stage-one artifact")
         width, height = payload.pop("resolution")
         payload["resolution"] = VideoResolution(width, height)
         payload["model"] = ModelKind(payload["model"])
+        raw_keyframes = payload.pop("keyframes", ())
+        payload["keyframes"] = tuple(
+            ImageKeyframe(Path(path), frame_index, strength) for path, frame_index, strength in raw_keyframes
+        )
         return cls(**payload)

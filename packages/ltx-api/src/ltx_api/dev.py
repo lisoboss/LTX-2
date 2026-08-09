@@ -17,7 +17,7 @@ from ltx_api.presets import (
     VIDEO_STG_SCALE,
 )
 from ltx_api.runtime import FRAME_RATE, ModelPaths, num_frames, synchronize
-from ltx_api.types import ModelKind, QualityPreviewRequest
+from ltx_api.types import ImageKeyframe, ModelKind, QualityPreviewRequest
 from ltx_core.components.guiders import MultiModalGuiderParams, create_multimodal_guider_factory
 from ltx_core.components.noisers import GaussianNoiser
 from ltx_core.components.schedulers import LTX2Scheduler
@@ -27,6 +27,8 @@ from ltx_core.types import Audio, VideoPixelShape
 from ltx_pipelines.ti2vid_two_stages import TI2VidTwoStagesPipeline
 from ltx_pipelines.utils.constants import STAGE_2_DISTILLED_SIGMAS
 from ltx_pipelines.utils.denoisers import FactoryGuidedDenoiser, SimpleDenoiser
+from ltx_pipelines.utils.args import ImageConditioningInput
+from ltx_pipelines.utils.helpers import combined_image_conditionings
 from ltx_pipelines.utils.types import ModalitySpec, OffloadMode
 
 
@@ -41,6 +43,12 @@ class DevAdapter:
             offload_mode=offload,
         )
         self.scheduler = LTX2Scheduler()
+
+    @staticmethod
+    def _image_inputs(keyframes: tuple[ImageKeyframe, ...]) -> list[ImageConditioningInput]:
+        return [
+            ImageConditioningInput(str(item.image_path), item.frame_index, item.strength) for item in keyframes
+        ]
 
     @torch.inference_mode()
     def preview(
@@ -65,6 +73,17 @@ class DevAdapter:
             width=request.resolution.width // 2,
             height=request.resolution.height // 2,
             fps=FRAME_RATE,
+        )
+        images = self._image_inputs(request.keyframes)
+        conditionings = p.image_conditioner(
+            lambda encoder: combined_image_conditionings(
+                images=images,
+                height=shape.height,
+                width=shape.width,
+                video_encoder=encoder,
+                dtype=p.dtype,
+                device=p.device,
+            )
         )
         sample_started = time.perf_counter()
         video_state, audio_state = p.stage_1(
@@ -100,7 +119,7 @@ class DevAdapter:
             height=shape.height,
             frames=frames,
             fps=FRAME_RATE,
-            video=ModalitySpec(context=positive.video_encoding),
+            video=ModalitySpec(context=positive.video_encoding, conditionings=conditionings),
             audio=ModalitySpec(context=positive.audio_encoding),
         )
         synchronize()
@@ -118,6 +137,7 @@ class DevAdapter:
             request.num_inference_steps,
             request.video_cfg_scale,
             request.audio_cfg_scale,
+            request.keyframes,
         )
         return (
             p.video_decoder(video_state.latent, None, generator),
@@ -144,6 +164,17 @@ class DevAdapter:
         )
         upscaled = p.upsampler(artifact.video_latent.to(device=p.device, dtype=p.dtype)[:1])
         sigmas = STAGE_2_DISTILLED_SIGMAS.to(dtype=torch.float32, device=p.device)
+        images = self._image_inputs(artifact.keyframes)
+        conditionings = p.image_conditioner(
+            lambda encoder: combined_image_conditionings(
+                images=images,
+                height=artifact.resolution.height,
+                width=artifact.resolution.width,
+                video_encoder=encoder,
+                dtype=p.dtype,
+                device=p.device,
+            )
+        )
         video_state, audio_state = p.stage_2(
             denoiser=SimpleDenoiser(positive.video_encoding, positive.audio_encoding),
             sigmas=sigmas,
@@ -152,7 +183,12 @@ class DevAdapter:
             height=artifact.resolution.height,
             frames=artifact.num_frames,
             fps=artifact.frame_rate,
-            video=ModalitySpec(context=positive.video_encoding, noise_scale=sigmas[0].item(), initial_latent=upscaled),
+            video=ModalitySpec(
+                context=positive.video_encoding,
+                conditionings=conditionings,
+                noise_scale=sigmas[0].item(),
+                initial_latent=upscaled,
+            ),
             audio=ModalitySpec(
                 context=positive.audio_encoding,
                 noise_scale=sigmas[0].item(),

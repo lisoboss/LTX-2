@@ -9,7 +9,7 @@ import torch
 
 from ltx_api.artifacts import StageOneArtifact
 from ltx_api.runtime import FRAME_RATE, ModelPaths, num_frames, synchronize
-from ltx_api.types import FastPreviewRequest, ModelKind
+from ltx_api.types import FastPreviewRequest, ImageKeyframe, ModelKind
 from ltx_core.components.noisers import GaussianNoiser
 from ltx_core.loader import LoraPathStrengthAndSDOps
 from ltx_core.loader.sd_ops import LTXV_LORA_COMFY_RENAMING_MAP
@@ -17,7 +17,8 @@ from ltx_core.types import Audio
 from ltx_pipelines.distilled import DistilledPipeline
 from ltx_pipelines.utils.constants import DISTILLED_SIGMAS, STAGE_2_DISTILLED_SIGMAS
 from ltx_pipelines.utils.denoisers import SimpleDenoiser
-from ltx_pipelines.utils.helpers import assert_resolution
+from ltx_pipelines.utils.args import ImageConditioningInput
+from ltx_pipelines.utils.helpers import assert_resolution, combined_image_conditionings
 from ltx_pipelines.utils.types import ModalitySpec, OffloadMode
 
 
@@ -30,6 +31,12 @@ class DistilledAdapter:
             loras=[LoraPathStrengthAndSDOps(str(paths.distilled_lora), 1.0, LTXV_LORA_COMFY_RENAMING_MAP)],
             offload_mode=offload,
         )
+
+    @staticmethod
+    def _image_inputs(keyframes: tuple[ImageKeyframe, ...]) -> list[ImageConditioningInput]:
+        return [
+            ImageConditioningInput(str(item.image_path), item.frame_index, item.strength) for item in keyframes
+        ]
 
     @torch.inference_mode()
     def preview(
@@ -47,6 +54,17 @@ class DistilledAdapter:
         synchronize()
         prompt_seconds = time.perf_counter() - prompt_started
         sample_started = time.perf_counter()
+        images = self._image_inputs(request.keyframes)
+        conditionings = pipeline.image_conditioner(
+            lambda encoder: combined_image_conditionings(
+                images=images,
+                height=resolution.height // 2,
+                width=resolution.width // 2,
+                video_encoder=encoder,
+                dtype=pipeline.dtype,
+                device=pipeline.device,
+            )
+        )
         video_state, audio_state = pipeline.stage(
             denoiser=SimpleDenoiser(context.video_encoding, context.audio_encoding),
             sigmas=DISTILLED_SIGMAS.to(dtype=torch.float32, device=pipeline.device),
@@ -55,7 +73,7 @@ class DistilledAdapter:
             height=resolution.height // 2,
             frames=frames,
             fps=FRAME_RATE,
-            video=ModalitySpec(context=context.video_encoding),
+            video=ModalitySpec(context=context.video_encoding, conditionings=conditionings),
             audio=ModalitySpec(context=context.audio_encoding),
         )
         synchronize()
@@ -70,6 +88,7 @@ class DistilledAdapter:
             resolution,
             frames,
             FRAME_RATE,
+            keyframes=request.keyframes,
         )
         return (
             pipeline.video_decoder(video_state.latent, None, generator),
@@ -92,6 +111,17 @@ class DistilledAdapter:
         (context,) = pipeline.prompt_encoder([artifact.prompt], enhance_first_prompt=False, enhance_prompt_image=None)
         synchronize()
         upscaled = pipeline.upsampler(artifact.video_latent.to(pipeline.device, pipeline.dtype)[:1])
+        images = self._image_inputs(artifact.keyframes)
+        conditionings = pipeline.image_conditioner(
+            lambda encoder: combined_image_conditionings(
+                images=images,
+                height=artifact.resolution.height,
+                width=artifact.resolution.width,
+                video_encoder=encoder,
+                dtype=pipeline.dtype,
+                device=pipeline.device,
+            )
+        )
         video_state, audio_state = pipeline.stage(
             denoiser=SimpleDenoiser(context.video_encoding, context.audio_encoding),
             sigmas=STAGE_2_DISTILLED_SIGMAS.to(dtype=torch.float32, device=pipeline.device),
@@ -101,7 +131,10 @@ class DistilledAdapter:
             frames=artifact.num_frames,
             fps=artifact.frame_rate,
             video=ModalitySpec(
-                context=context.video_encoding, noise_scale=STAGE_2_DISTILLED_SIGMAS[0].item(), initial_latent=upscaled
+                context=context.video_encoding,
+                conditionings=conditionings,
+                noise_scale=STAGE_2_DISTILLED_SIGMAS[0].item(),
+                initial_latent=upscaled,
             ),
             audio=ModalitySpec(
                 context=context.audio_encoding,

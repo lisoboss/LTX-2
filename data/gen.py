@@ -2,8 +2,8 @@
 """Resumable LTX-API renderer for the first episode of *Deep Space*.
 
 Examples:
-    uv run python data/gen.py --scene 1 --stage full
-    uv run python data/gen.py --all --stage full
+    uv run python data/gen.py --scene 1 --stage full --keyframe-root data/keyframes
+    uv run python data/gen.py --all --stage full --keyframe-root data/keyframes
     uv run python data/gen.py --all --stage full --dry-run
 
 Each scene writes independently under ``data/generated_recut_v1/scene_XX``. A stage is
@@ -33,6 +33,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 DATA_ROOT = Path(__file__).resolve().parent
 DEFAULT_MODEL_ROOT = REPOSITORY_ROOT / "models"
 DEFAULT_OUTPUT_ROOT = DATA_ROOT / "generated_recut_v1"
+DEFAULT_KEYFRAME_ROOT = DATA_ROOT / "keyframes"
 RESOLUTION = (1280, 768)
 BASE_SEED = 42_000
 QUALITY_PRESETS = ("fast", "standard", "high")
@@ -77,6 +78,12 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--model-root", type=Path, default=DEFAULT_MODEL_ROOT)
     result.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     result.add_argument(
+        "--keyframe-root",
+        type=Path,
+        default=DEFAULT_KEYFRAME_ROOT,
+        help="scene keyframes: scene_XX/first.png, optional middle.png and last.png",
+    )
+    result.add_argument(
         "--quality",
         choices=QUALITY_PRESETS,
         default="fast",
@@ -104,7 +111,17 @@ def status_path(directory: Path) -> Path:
     return directory / "status.json"
 
 
-def new_status(scene: ScenePrompt, seed: int, quality: str) -> dict[str, Any]:
+def scene_keyframes(keyframe_root: Path, scene: ScenePrompt) -> tuple[Path, Path | None, Path | None]:
+    directory = keyframe_root / f"scene_{scene.number:02d}"
+    first = directory / "first.png"
+    middle = directory / "middle.png"
+    last = directory / "last.png"
+    if not first.is_file():
+        raise FileNotFoundError(f"scene {scene.number:02d} requires an approved first frame: {first}")
+    return first, middle if middle.is_file() else None, last if last.is_file() else None
+
+
+def new_status(scene: ScenePrompt, seed: int, quality: str, keyframes: tuple[Path, Path | None, Path | None]) -> dict[str, Any]:
     return {
         "scene": scene.number,
         "title": scene.title,
@@ -113,6 +130,7 @@ def new_status(scene: ScenePrompt, seed: int, quality: str) -> dict[str, Any]:
         "seed": seed,
         "model": "22b-dev",
         "quality": quality,
+        "keyframes": [str(path) if path is not None else None for path in keyframes],
         "prompt": scene.full_prompt,
         "prompt_summary": scene.prompt[:180],
         "stages": {},
@@ -120,10 +138,12 @@ def new_status(scene: ScenePrompt, seed: int, quality: str) -> dict[str, Any]:
     }
 
 
-def load_status(directory: Path, scene: ScenePrompt, seed: int, quality: str) -> dict[str, Any]:
+def load_status(
+    directory: Path, scene: ScenePrompt, seed: int, quality: str, keyframes: tuple[Path, Path | None, Path | None]
+) -> dict[str, Any]:
     path = status_path(directory)
     if not path.exists():
-        return new_status(scene, seed, quality)
+        return new_status(scene, seed, quality, keyframes)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as error:
@@ -132,8 +152,9 @@ def load_status(directory: Path, scene: ScenePrompt, seed: int, quality: str) ->
         payload.get("scene") != scene.number
         or payload.get("prompt") != scene.full_prompt
         or payload.get("quality") != quality
+        or payload.get("keyframes") != [str(path) if path is not None else None for path in keyframes]
     ):
-        raise ValueError(f"status does not match current prompt or quality: {path}; choose a new --output-root")
+        raise ValueError(f"status does not match current prompt, quality, or keyframes: {path}; choose a new --output-root")
     return payload
 
 
@@ -201,10 +222,14 @@ def render_scene(args: argparse.Namespace, scene: ScenePrompt, creator: VideoCre
     logger = SceneLogger(directory / "workflow.log")
     seed = BASE_SEED + scene.number
     quality = getattr(args, "quality", "fast")
-    status = load_status(directory, scene, seed, quality)
+    keyframes = scene_keyframes(args.keyframe_root, scene)
+    status = load_status(directory, scene, seed, quality, keyframes)
     stages = requested_stages(Stage(args.stage))
     stage_names = ",".join(stage.value for stage in stages)
-    logger.write(f"scene={scene.number:02d} title={scene.title!r} stages={stage_names} seed={seed} quality={quality}")
+    logger.write(
+        f"scene={scene.number:02d} title={scene.title!r} stages={stage_names} seed={seed} quality={quality} "
+        f"first_frame={keyframes[0]}"
+    )
 
     for stage in stages:
         if completed(status, directory, stage) and not args.force:
@@ -220,15 +245,20 @@ def render_scene(args: argparse.Namespace, scene: ScenePrompt, creator: VideoCre
         try:
             logger.write(f"stage={stage.value} started")
             if stage is Stage.PREVIEW:
-                request = (
+                request_builder = (
                     QualityPreviewBuilder()
                     .prompt(scene.full_prompt)
                     .duration_seconds(scene.duration_seconds)
                     .resolution(*RESOLUTION)
                     .seed(seed)
                     .quality(quality)
-                    .build()
+                    .first_frame(keyframes[0])
                 )
+                if keyframes[1] is not None:
+                    request_builder.middle_frame(keyframes[1], at_seconds=scene.duration_seconds / 2)
+                if keyframes[2] is not None:
+                    request_builder.last_frame(keyframes[2])
+                request = request_builder.build()
                 result = creator.preview(
                     request,
                     artifact_path=directory / "preview.pt",
@@ -283,7 +313,7 @@ def main() -> int:
         return 2
     print(
         f"[{timestamp()}] planned scenes={len(scenes)} stage={args.stage} quality={args.quality} "
-        f"output_root={args.output_root}",
+        f"output_root={args.output_root} keyframe_root={args.keyframe_root}",
         flush=True,
     )
     creator = None if args.dry_run else VideoCreator(args.model_root, offload_mode=OffloadMode.DISK)

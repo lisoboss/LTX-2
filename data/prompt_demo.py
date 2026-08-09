@@ -1,12 +1,14 @@
-"""Run one custom LTX-2.3 prompt through the preview-production workflow.
+"""Run a first-frame-guided LTX-2.3 prompt through the preview-production workflow.
 
 Examples:
-    uv run python data/prompt_demo.py --prompt "A 35mm camera follows a fox through snow..."
-    uv run python data/prompt_demo.py --prompt "..." --stage full --quality standard
-    uv run python data/prompt_demo.py --prompt-file data/my_prompt.txt --stage enhance
+    uv run python data/prompt_demo.py --first-frame data/frames/opening.png --prompt "A 35mm camera follows a fox through snow..."
+    uv run python data/prompt_demo.py --first-frame data/frames/opening.png --last-frame data/frames/ending.png --prompt "..." --stage full
+    uv run python data/prompt_demo.py --first-frame data/frames/opening.png --middle-frame data/frames/turn.png 2.5 --prompt-file data/my_prompt.txt
 
+``--first-frame`` is required: generate and approve that image before invoking
+LTX.  ``--middle-frame IMAGE SECONDS`` and ``--last-frame`` are optional.
 The default ``preview`` stage creates both an MP4 and a reusable Stage 1 latent
-artifact.  Use ``--stage production`` or ``--stage enhance`` later without
+artifact. Use ``--stage production`` or ``--stage enhance`` later without
 sampling Stage 1 again.
 """
 
@@ -38,6 +40,16 @@ def build_parser() -> argparse.ArgumentParser:
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--prompt", help="one complete English LTX prompt")
     source.add_argument("--prompt-file", type=Path, help="UTF-8 text file containing one complete prompt")
+    parser.add_argument("--first-frame", type=Path, help="approved opening-frame image (required for preview)")
+    parser.add_argument(
+        "--middle-frame",
+        action="append",
+        nargs=2,
+        metavar=("IMAGE", "SECONDS"),
+        default=[],
+        help="optional approved image and its time within the video; may be repeated",
+    )
+    parser.add_argument("--last-frame", type=Path, help="optional approved final-frame image")
     parser.add_argument("--stage", choices=tuple(Stage), default=Stage.PREVIEW)
     parser.add_argument("--quality", choices=QUALITY_PRESETS, default="fast")
     parser.add_argument("--duration-seconds", type=float, default=5.0)
@@ -80,15 +92,25 @@ def main() -> int:
     stage = Stage(args.stage)
 
     if stage in (Stage.PREVIEW, Stage.FULL):
-        request = (
+        if args.first_frame is None:
+            build_parser().error("--first-frame is required when generating a preview")
+        builder = (
             QualityPreviewBuilder()
             .prompt(prompt)
             .duration_seconds(args.duration_seconds)
             .resolution(args.width, args.height)
             .seed(args.seed)
             .quality(args.quality)
-            .build()
+            .first_frame(args.first_frame)
         )
+        try:
+            for image_path, seconds in args.middle_frame:
+                builder.middle_frame(Path(image_path), at_seconds=float(seconds))
+        except ValueError as error:
+            build_parser().error(f"--middle-frame SECONDS must be a number: {error}")
+        if args.last_frame is not None:
+            builder.last_frame(args.last_frame)
+        request = builder.build()
         creator.preview(request, artifact_path=artifact_path, output_path=preview_path)
         print(f"preview: {preview_path}\nartifact: {artifact_path}", flush=True)
 

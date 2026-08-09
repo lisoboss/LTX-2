@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from math import isfinite
 from pathlib import Path
 
 
@@ -42,11 +43,35 @@ def _round_up_64(value: int) -> int:
 
 
 @dataclass(frozen=True)
+class ImageKeyframe:
+    """One user-approved image that constrains a particular output video frame."""
+
+    image_path: Path
+    frame_index: int
+    strength: float = 1.0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.image_path, Path):
+            raise TypeError("image_path must be a pathlib.Path")
+        if isinstance(self.frame_index, bool) or not isinstance(self.frame_index, int) or self.frame_index < 0:
+            raise ValueError("frame_index must be a non-negative integer")
+        if (
+            not isinstance(self.strength, (int, float))
+            or isinstance(self.strength, bool)
+            or not isfinite(self.strength)
+        ):
+            raise ValueError("strength must be a finite number from 0 (exclusive) to 1 (inclusive)")
+        if not 0 < self.strength <= 1:
+            raise ValueError("strength must be from 0 (exclusive) to 1 (inclusive)")
+
+
+@dataclass(frozen=True)
 class FastPreviewRequest:
     prompt: str
     duration_seconds: float
     resolution: VideoResolution
     seed: int | None
+    keyframes: tuple[ImageKeyframe, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -60,6 +85,7 @@ class QualityPreviewRequest:
     num_inference_steps: int
     video_cfg_scale: float
     audio_cfg_scale: float
+    keyframes: tuple[ImageKeyframe, ...] = ()
 
 
 @dataclass(frozen=True)

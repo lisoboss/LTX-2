@@ -50,7 +50,7 @@ class VideoCreator:
         return PreviewResult(
             output_path,
             artifact_path,
-            ModelKind.DISTILLED,
+            ModelKind.DISTILLED if isinstance(request, FastPreviewRequest) else ModelKind.DEV,
             request,
             metrics(
                 prompt_seconds=prompt_seconds,
