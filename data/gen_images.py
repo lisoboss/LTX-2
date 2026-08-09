@@ -2,7 +2,7 @@
 
 Examples:
     uv run python data/gen_images.py --scene 1 --frame first --dry-run
-    uv run python data/gen_images.py --scene 1 --frame first  # 10 random candidates
+    uv run python data/gen_images.py --scene 1 --frame first  # 10 fixed-seed candidates
     uv run python data/gen_images.py --all --frame all
 
 The source prompts are the independent Chinese image prompts in
@@ -37,6 +37,10 @@ DEFAULT_WORKFLOW_FILE = DATA_ROOT / "workflows" / "comfui-gen-image-api.json"
 DEFAULT_CANDIDATE_ROOT = DATA_ROOT / "keyframe_candidates"
 DEFAULT_COMFY_URL = "http://192.168.31.3:8000"
 TARGET_SIZE = (1280, 768)
+
+# Candidate N uses the same seed in every frame.  Once a candidate number is
+# visually preferred for a character, keep that number for later shots.
+DEFAULT_CANDIDATE_SEEDS = (42001, 42002, 42003, 42004, 42005, 42006, 42007, 42008, 42009, 42010)
 
 # Nodes in the exported, versioned ``comfui-gen-image-api.json`` workflow.
 POSITIVE_PROMPT_NODE = "82"
@@ -79,12 +83,11 @@ def parse_arguments() -> argparse.Namespace:
         default=DEFAULT_CANDIDATE_ROOT,
         help="unapproved candidate images; these are separate from data/keyframes",
     )
-    parser.add_argument("--samples", type=int, default=10, help="random candidates per prompt (default: 10)")
+    parser.add_argument("--samples", type=int, default=10, help="fixed-seed candidates per prompt (default: 10)")
     parser.add_argument(
-        "--seed",
-        type=int,
-        default=-1,
-        help="ComfyUI seed; -1 lets the rgthree Seed node choose a fresh random seed each run",
+        "--seeds",
+        default=",".join(str(seed) for seed in DEFAULT_CANDIDATE_SEEDS),
+        help="comma-separated candidate seeds; candidate N uses seed N in every frame",
     )
     parser.add_argument("--poll-seconds", type=float, default=5.0)
     parser.add_argument("--force", action="store_true", help="regenerate images that already exist")
@@ -152,6 +155,18 @@ def selected(prompts: tuple[ImagePrompt, ...], args: argparse.Namespace) -> tupl
     if not result:
         raise ValueError("the requested scene/frame has no image prompt")
     return result
+
+
+def parse_seeds(value: str, samples: int) -> tuple[int, ...]:
+    try:
+        seeds = tuple(int(part.strip()) for part in value.split(",") if part.strip())
+    except ValueError as error:
+        raise ValueError("--seeds must be comma-separated integers") from error
+    if len(seeds) < samples:
+        raise ValueError(f"--samples={samples} requires at least {samples} values in --seeds")
+    if len(set(seeds[:samples])) != samples:
+        raise ValueError("the selected --seeds values must be unique")
+    return seeds[:samples]
 
 
 def request_json(url: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -279,6 +294,7 @@ def main() -> int:
     try:
         if args.samples < 1:
             raise ValueError("--samples must be at least 1")
+        seeds = parse_seeds(args.seeds, args.samples)
         prompts = selected(load_prompts(args.prompt_file), args)
         workflow = json.loads(args.workflow_file.read_text(encoding="utf-8"))
         require_workflow_nodes(workflow)
@@ -290,7 +306,8 @@ def main() -> int:
         samples = 1 if item.solid_color is not None else args.samples
         for sample in range(1, samples + 1):
             target = output_path(args.output_root, item) / f"candidate_{sample:02d}.png"
-            label = f"scene={item.scene:02d} frame={item.filename} candidate={sample:02d} seed={args.seed}"
+            seed = seeds[sample - 1]
+            label = f"scene={item.scene:02d} frame={item.filename} candidate={sample:02d} seed={seed}"
             if target.is_file() and target.stat().st_size > 0 and not args.force:
                 print(f"[{timestamp()}] {label} skipped: {target} already exists", flush=True)
                 continue
@@ -305,7 +322,7 @@ def main() -> int:
                     prompt_id = None
                     result = None
                 else:
-                    prompt_id, _ = submit_image(args.comfy_url.rstrip("/"), workflow, item, args.seed)
+                    prompt_id, _ = submit_image(args.comfy_url.rstrip("/"), workflow, item, seed)
                     print(f"[{timestamp()}] {label} prompt_id={prompt_id}", flush=True)
                     result = await_final_image(args.comfy_url.rstrip("/"), prompt_id, args.poll_seconds)
                     fit_for_ltx(read_bytes(image_url(args.comfy_url.rstrip("/"), result)), target)
@@ -316,7 +333,7 @@ def main() -> int:
                         "success": True,
                         "candidate": f"candidate_{sample:02d}",
                         "completed_at": timestamp(),
-                        "requested_seed": args.seed,
+                        "seed": seed,
                         "prompt": item.prompt,
                         "prompt_id": prompt_id,
                         "comfy_output": result,
@@ -333,7 +350,7 @@ def main() -> int:
                         "success": False,
                         "candidate": f"candidate_{sample:02d}",
                         "failed_at": timestamp(),
-                        "requested_seed": args.seed,
+                        "seed": seed,
                         "error": f"{type(error).__name__}: {error}",
                     },
                 )
