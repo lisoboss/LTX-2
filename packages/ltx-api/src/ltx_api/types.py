@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum
 from math import isfinite
 from pathlib import Path
 
 
-class ModelKind(StrEnum):
+class ModelKind(str, Enum):
     DEV = "dev"
     DISTILLED = "distilled"
 
 
-class QualityPreset(StrEnum):
+class QualityPreset(str, Enum):
     FAST = "fast"
     STANDARD = "standard"
     HIGH = "high"

@@ -15,7 +15,7 @@ sampling Stage 1 again.
 from __future__ import annotations
 
 import argparse
-from enum import StrEnum
+from enum import Enum
 from pathlib import Path
 
 from ltx_api import QualityPreviewBuilder, VideoCreator
@@ -28,7 +28,7 @@ DEFAULT_OUTPUT_DIRECTORY = Path(__file__).resolve().parent / "prompt_demo_output
 QUALITY_PRESETS = ("fast", "standard", "high")
 
 
-class Stage(StrEnum):
+class Stage(str, Enum):
     PREVIEW = "preview"
     PRODUCTION = "production"
     ENHANCE = "enhance"

@@ -19,7 +19,7 @@
 - dev / distilled 的 Stage 1 与 Stage 2 均应用关键帧条件。
 - artifact 以可安全加载的基础数据持久化关键帧；旧 artifact 没有关键帧时仍可继续 production。
 - `data/prompt_demo.py` 的 preview/full 模式要求 `--first-frame`，可重复 `--middle-frame IMAGE SECONDS`，可选 `--last-frame`。
-- `data/gen.py` 从 `scene_XX/first.png` 读取每镜首帧；同目录的 `middle.png`、`last.png` 为可选条件，批量生成不再静默回退到纯 T2V。
+- `data/gen.py` 从 `scene_XX/first.png` 读取每镜首帧；Python 3.10 标准库可读取的 `keyframes.ini` 可定义任意多个可选 `middle_XX.png` 的准确秒点及可选 `last.png`，批量生成不再静默回退到纯 T2V。
 
 ## 非目标
 

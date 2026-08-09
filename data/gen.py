@@ -13,10 +13,12 @@ only skipped when both its success flag and its expected output file exist.
 from __future__ import annotations
 
 import argparse
+import configparser
+import hashlib
 import json
 import sys
 import traceback
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
@@ -81,7 +83,7 @@ def parser() -> argparse.ArgumentParser:
         "--keyframe-root",
         type=Path,
         default=DEFAULT_KEYFRAME_ROOT,
-        help="scene keyframes: scene_XX/first.png, optional middle.png and last.png",
+        help="scene keyframes: first.png plus optional keyframes.ini and last.png",
     )
     result.add_argument(
         "--quality",
@@ -111,17 +113,89 @@ def status_path(directory: Path) -> Path:
     return directory / "status.json"
 
 
-def scene_keyframes(keyframe_root: Path, scene: ScenePrompt) -> tuple[Path, Path | None, Path | None]:
+@dataclass(frozen=True)
+class TimedKeyframe:
+    path: Path
+    at_seconds: float
+    strength: float
+
+
+@dataclass(frozen=True)
+class SceneKeyframes:
+    first: Path
+    middle: tuple[TimedKeyframe, ...]
+    last: Path | None
+
+    def status_value(self) -> dict[str, Any]:
+        return {
+            "first": keyframe_file_status(self.first),
+            "middle": [
+                {
+                    "path": str(item.path),
+                    "sha256": keyframe_file_status(item.path)["sha256"],
+                    "at_seconds": item.at_seconds,
+                    "strength": item.strength,
+                }
+                for item in self.middle
+            ],
+            "last": keyframe_file_status(self.last) if self.last is not None else None,
+        }
+
+
+def keyframe_file_status(path: Path) -> dict[str, str]:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return {"path": str(path), "sha256": digest.hexdigest()}
+
+
+def scene_keyframes(keyframe_root: Path, scene: ScenePrompt) -> SceneKeyframes:
     directory = keyframe_root / f"scene_{scene.number:02d}"
     first = directory / "first.png"
-    middle = directory / "middle.png"
     last = directory / "last.png"
     if not first.is_file():
         raise FileNotFoundError(f"scene {scene.number:02d} requires an approved first frame: {first}")
-    return first, middle if middle.is_file() else None, last if last.is_file() else None
+
+    manifest_path = directory / "keyframes.ini"
+    if not manifest_path.is_file():
+        middle = directory / "middle.png"
+        middle_frames = (TimedKeyframe(middle, scene.duration_seconds / 2, 1.0),) if middle.is_file() else ()
+        return SceneKeyframes(first, middle_frames, last if last.is_file() else None)
+
+    try:
+        manifest = configparser.ConfigParser()
+        with manifest_path.open(encoding="utf-8") as stream:
+            manifest.read_file(stream)
+    except configparser.Error as error:
+        raise ValueError(f"invalid keyframe manifest: {manifest_path}") from error
+
+    middle_frames: list[TimedKeyframe] = []
+    middle_sections = sorted(section for section in manifest.sections() if section.startswith("middle_"))
+    for number, section in enumerate(middle_sections, start=1):
+        item = manifest[section]
+        relative_path = item.get("file")
+        try:
+            at_seconds = item.getfloat("at_seconds")
+            strength = item.getfloat("strength", fallback=1.0)
+        except ValueError as error:
+            raise ValueError(f"{section} has an invalid numeric value: {manifest_path}") from error
+        if not relative_path:
+            raise ValueError(f"{section}.file must be a non-empty path: {manifest_path}")
+        path = directory / relative_path
+        if not path.is_file():
+            continue
+        middle_frames.append(TimedKeyframe(path, at_seconds, strength))
+
+    if manifest.has_section("last_frame"):
+        relative_path = manifest["last_frame"].get("file")
+        if not relative_path:
+            raise ValueError(f"last_frame.file must be a path: {manifest_path}")
+        last = directory / relative_path
+    return SceneKeyframes(first, tuple(middle_frames), last if last.is_file() else None)
 
 
-def new_status(scene: ScenePrompt, seed: int, quality: str, keyframes: tuple[Path, Path | None, Path | None]) -> dict[str, Any]:
+def new_status(scene: ScenePrompt, seed: int, quality: str, keyframes: SceneKeyframes) -> dict[str, Any]:
     return {
         "scene": scene.number,
         "title": scene.title,
@@ -130,7 +204,7 @@ def new_status(scene: ScenePrompt, seed: int, quality: str, keyframes: tuple[Pat
         "seed": seed,
         "model": "22b-dev",
         "quality": quality,
-        "keyframes": [str(path) if path is not None else None for path in keyframes],
+        "keyframes": keyframes.status_value(),
         "prompt": scene.full_prompt,
         "prompt_summary": scene.prompt[:180],
         "stages": {},
@@ -139,7 +213,13 @@ def new_status(scene: ScenePrompt, seed: int, quality: str, keyframes: tuple[Pat
 
 
 def load_status(
-    directory: Path, scene: ScenePrompt, seed: int, quality: str, keyframes: tuple[Path, Path | None, Path | None]
+    directory: Path,
+    scene: ScenePrompt,
+    seed: int,
+    quality: str,
+    keyframes: SceneKeyframes,
+    *,
+    reset_preview: bool,
 ) -> dict[str, Any]:
     path = status_path(directory)
     if not path.exists():
@@ -152,9 +232,14 @@ def load_status(
         payload.get("scene") != scene.number
         or payload.get("prompt") != scene.full_prompt
         or payload.get("quality") != quality
-        or payload.get("keyframes") != [str(path) if path is not None else None for path in keyframes]
+        or payload.get("keyframes") != keyframes.status_value()
     ):
-        raise ValueError(f"status does not match current prompt, quality, or keyframes: {path}; choose a new --output-root")
+        if reset_preview:
+            return new_status(scene, seed, quality, keyframes)
+        raise ValueError(
+            f"status does not match current prompt, quality, or keyframes: {path}; "
+            "use --force with --stage preview/full or choose a new --output-root"
+        )
     return payload
 
 
@@ -223,12 +308,19 @@ def render_scene(args: argparse.Namespace, scene: ScenePrompt, creator: VideoCre
     seed = BASE_SEED + scene.number
     quality = getattr(args, "quality", "fast")
     keyframes = scene_keyframes(args.keyframe_root, scene)
-    status = load_status(directory, scene, seed, quality, keyframes)
     stages = requested_stages(Stage(args.stage))
+    status = load_status(
+        directory,
+        scene,
+        seed,
+        quality,
+        keyframes,
+        reset_preview=args.force and Stage.PREVIEW in stages,
+    )
     stage_names = ",".join(stage.value for stage in stages)
     logger.write(
         f"scene={scene.number:02d} title={scene.title!r} stages={stage_names} seed={seed} quality={quality} "
-        f"first_frame={keyframes[0]}"
+        f"first_frame={keyframes.first} middle_frames={len(keyframes.middle)}"
     )
 
     for stage in stages:
@@ -252,12 +344,14 @@ def render_scene(args: argparse.Namespace, scene: ScenePrompt, creator: VideoCre
                     .resolution(*RESOLUTION)
                     .seed(seed)
                     .quality(quality)
-                    .first_frame(keyframes[0])
+                    .first_frame(keyframes.first)
                 )
-                if keyframes[1] is not None:
-                    request_builder.middle_frame(keyframes[1], at_seconds=scene.duration_seconds / 2)
-                if keyframes[2] is not None:
-                    request_builder.last_frame(keyframes[2])
+                for keyframe in keyframes.middle:
+                    request_builder.middle_frame(
+                        keyframe.path, at_seconds=keyframe.at_seconds, strength=keyframe.strength
+                    )
+                if keyframes.last is not None:
+                    request_builder.last_frame(keyframes.last)
                 request = request_builder.build()
                 result = creator.preview(
                     request,

@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import isfinite
 from pathlib import Path
-from typing import Self
+
+from typing_extensions import Self
 
 from ltx_api.presets import QUALITY_PRESETS
 from ltx_api.runtime import num_frames

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Safe three-stage Python API for LTX-2 preview, production, and enhancement"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["ltx-core", "ltx-pipelines"]
+dependencies = ["ltx-core", "ltx-pipelines", "typing-extensions>=4.0"]
 
 [build-system]
 requires = ["uv_build>=0.9.8,<0.10.0"]
