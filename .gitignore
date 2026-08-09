@@ -69,3 +69,5 @@ wandb/
 *.so
 
 /models
+
+!data/workflows/*.json

@@ -1,0 +1,456 @@
+{
+  "17": {
+    "inputs": {
+      "seed": -1
+    },
+    "class_type": "Seed (rgthree)",
+    "_meta": {
+      "title": "Seed (rgthree)"
+    }
+  },
+  "82": {
+    "inputs": {
+      "text": "35mm 仰拍，机位贴近底舱低矮的粗木梁。三盏悬在铁链上的琥珀色煤油风灯占据画面中央和上方，灯下只有深黑空间；画面中没有地板、人物或舱壁。",
+      "clip": [
+        "100:81",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "83": {
+    "inputs": {
+      "text": "泛黄，模糊，低分辨率，低质量图像，诡异的外观，多餘手臂, 多餘腿部，丑陋，躁点，网格感，JPEG压缩条纹，水印，乱码，意义不明的字符，大头照，半身照，",
+      "clip": [
+        "100:81",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP文本编码"
+    }
+  },
+  "87": {
+    "inputs": {
+      "add_noise": "enable",
+      "noise_seed": [
+        "17",
+        0
+      ],
+      "steps": 25,
+      "cfg": 4,
+      "sampler_name": "res_multistep",
+      "scheduler": "simple",
+      "start_at_step": 0,
+      "end_at_step": 12,
+      "return_with_leftover_noise": "enable",
+      "model": [
+        "100:85",
+        0
+      ],
+      "positive": [
+        "82",
+        0
+      ],
+      "negative": [
+        "83",
+        0
+      ],
+      "latent_image": [
+        "101",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "K采样器（高级）"
+    }
+  },
+  "90": {
+    "inputs": {
+      "upscale_method": "bislerp",
+      "scale_by": 1.7,
+      "samples": [
+        "87",
+        0
+      ]
+    },
+    "class_type": "LatentUpscaleBy",
+    "_meta": {
+      "title": "缩放Latent（比例）"
+    }
+  },
+  "91": {
+    "inputs": {
+      "conditioning": [
+        "83",
+        0
+      ]
+    },
+    "class_type": "ConditioningZeroOut",
+    "_meta": {
+      "title": "条件零化"
+    }
+  },
+  "92": {
+    "inputs": {
+      "add_noise": "disable",
+      "noise_seed": [
+        "17",
+        0
+      ],
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "dpmpp_2m_sde",
+      "scheduler": "sgm_uniform",
+      "start_at_step": 2,
+      "end_at_step": 10000,
+      "return_with_leftover_noise": "disable",
+      "model": [
+        "100:89",
+        0
+      ],
+      "positive": [
+        "82",
+        0
+      ],
+      "negative": [
+        "91",
+        0
+      ],
+      "latent_image": [
+        "90",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "K采样器（高级）"
+    }
+  },
+  "101": {
+    "inputs": {
+      "width": 1280,
+      "height": 720,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "空Latent图像"
+    }
+  },
+  "116": {
+    "inputs": {
+      "samples": [
+        "92",
+        0
+      ],
+      "vae": [
+        "100:14",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "118": {
+    "inputs": {
+      "filename_prefix": [
+        "117:107",
+        0
+      ],
+      "images": [
+        "116",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "130": {
+    "inputs": {
+      "samples": [
+        "87",
+        0
+      ],
+      "vae": [
+        "100:14",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "132": {
+    "inputs": {
+      "filename_prefix": [
+        "131:125",
+        0
+      ],
+      "images": [
+        "130",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存图像"
+    }
+  },
+  "100:85": {
+    "inputs": {
+      "shift": 3,
+      "model": [
+        "100:86",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "采样算法（AuraFlow）"
+    }
+  },
+  "100:81": {
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "100:86": {
+    "inputs": {
+      "unet_name": "moody-wild-mix-v2.0-base-45-steps.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "100:14": {
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "100:88": {
+    "inputs": {
+      "unet_name": "moody-porn-mix-v10-dpo.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "100:89": {
+    "inputs": {
+      "shift": 3,
+      "model": [
+        "100:88",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "采样算法（AuraFlow）"
+    }
+  },
+  "117:106": {
+    "inputs": {
+      "input": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "Stringer ToString",
+    "_meta": {
+      "title": "Stringer ToString"
+    }
+  },
+  "117:109": {
+    "inputs": {
+      "value": "2st"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "字符串"
+    }
+  },
+  "117:107": {
+    "inputs": {
+      "delimiter": "_",
+      "string1": [
+        "117:122",
+        0
+      ],
+      "string2": [
+        "117:106",
+        0
+      ]
+    },
+    "class_type": "JoinStrings",
+    "_meta": {
+      "title": "Join Strings"
+    }
+  },
+  "117:119": {
+    "inputs": {
+      "value": "multi-step_generation"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "字符串"
+    }
+  },
+  "117:120": {
+    "inputs": {
+      "delimiter": "/",
+      "string1": [
+        "117:119",
+        0
+      ],
+      "string2": [
+        "117:109",
+        0
+      ]
+    },
+    "class_type": "JoinStrings",
+    "_meta": {
+      "title": "Join Strings"
+    }
+  },
+  "117:121": {
+    "inputs": {
+      "value": "seed"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "字符串"
+    }
+  },
+  "117:122": {
+    "inputs": {
+      "delimiter": "/",
+      "string1": [
+        "117:120",
+        0
+      ],
+      "string2": [
+        "117:121",
+        0
+      ]
+    },
+    "class_type": "JoinStrings",
+    "_meta": {
+      "title": "Join Strings"
+    }
+  },
+  "131:123": {
+    "inputs": {
+      "input": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "Stringer ToString",
+    "_meta": {
+      "title": "Stringer ToString"
+    }
+  },
+  "131:124": {
+    "inputs": {
+      "value": "1st"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "字符串"
+    }
+  },
+  "131:125": {
+    "inputs": {
+      "delimiter": "_",
+      "string1": [
+        "131:129",
+        0
+      ],
+      "string2": [
+        "131:123",
+        0
+      ]
+    },
+    "class_type": "JoinStrings",
+    "_meta": {
+      "title": "Join Strings"
+    }
+  },
+  "131:126": {
+    "inputs": {
+      "value": "multi-step_generation"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "字符串"
+    }
+  },
+  "131:127": {
+    "inputs": {
+      "delimiter": "/",
+      "string1": [
+        "131:126",
+        0
+      ],
+      "string2": [
+        "131:124",
+        0
+      ]
+    },
+    "class_type": "JoinStrings",
+    "_meta": {
+      "title": "Join Strings"
+    }
+  },
+  "131:128": {
+    "inputs": {
+      "value": "seed"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "字符串"
+    }
+  },
+  "131:129": {
+    "inputs": {
+      "delimiter": "/",
+      "string1": [
+        "131:127",
+        0
+      ],
+      "string2": [
+        "131:128",
+        0
+      ]
+    },
+    "class_type": "JoinStrings",
+    "_meta": {
+      "title": "Join Strings"
+    }
+  }
+}
