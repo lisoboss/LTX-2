@@ -106,7 +106,7 @@ def load_prompts(path: Path) -> tuple[ImagePrompt, ...]:
     scene: int | None = None
     index = 0
     while index < len(lines):
-        scene_match = SCENE_HEADER.fullmatch(lines[index])
+        scene_match = SCENE_HEADER.match(lines[index])
         if scene_match is not None:
             scene = int(scene_match["number"])
             index += 1
@@ -120,7 +120,7 @@ def load_prompts(path: Path) -> tuple[ImagePrompt, ...]:
         solid_color = prompt_color(frame_match["note"])
         index += 1
         while index < len(lines) and not lines[index].startswith("```text"):
-            if SCENE_HEADER.fullmatch(lines[index]) or FRAME_HEADER.fullmatch(lines[index]):
+            if SCENE_HEADER.match(lines[index]) or FRAME_HEADER.fullmatch(lines[index]):
                 break
             index += 1
         if index >= len(lines) or not lines[index].startswith("```text"):
